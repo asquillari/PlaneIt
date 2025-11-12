@@ -6,16 +6,16 @@ CREATE TABLE viajes (
   nombre TEXT NOT NULL
 );
 
-INSERT INTO viajes (nombre) VALUES ('Viaje Demo ITBA') ON CONFLICT DO NOTHING;
+INSERT INTO viajes (id, nombre) VALUES ('11111111-1111-1111-1111-111111111111', 'Viaje Demo ITBA') ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE actividades (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
   titulo TEXT NOT NULL,
-  fecha_hora TIMESTAMP NOT NULL,
+  fecha_hora TIMESTAMPTZ NOT NULL,
   tipo TEXT DEFAULT 'actividad',
   creado_por TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE OR REPLACE FUNCTION notify_n8n()

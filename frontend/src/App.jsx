@@ -62,6 +62,16 @@ function App() {
     return EVENT_TYPES[tipo]?.label || EVENT_TYPES.otro.label;
   };
 
+  // Convertir Date a formato datetime-local (YYYY-MM-DDTHH:mm en hora local)
+  const dateToLocalDateTime = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
   const handleDateClick = (arg) => {
     const dateStr = arg.dateStr;
     const timeStr = arg.date.toTimeString().slice(0, 5);
@@ -76,24 +86,21 @@ function App() {
 
   const handleEventClick = (info) => {
     const event = info.event;
+    // event.start ya está en la zona horaria local de FullCalendar
     const fecha = new Date(event.start);
-    const fechaLocal = fecha.toLocaleString('es-AR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    
+    // Convertir a formato datetime-local sin cambiar la zona horaria
+    const fechaLocal = dateToLocalDateTime(fecha);
     
     setEditingEvent({
       id: event.id,
       titulo: event.title,
-      fecha_hora: fecha.toISOString().slice(0, 16),
+      fecha_hora: fechaLocal,
       tipo: event.extendedProps.tipo
     });
     setNewEvent({
       titulo: event.title,
-      fecha_hora: fecha.toISOString().slice(0, 16),
+      fecha_hora: fechaLocal,
       tipo: event.extendedProps.tipo
     });
     setIsModalOpen(true);
@@ -107,8 +114,20 @@ function App() {
     }
 
     try {
+      // datetime-local devuelve "YYYY-MM-DDTHH:mm" en hora local (sin zona horaria)
+      // new Date() interpreta esto como hora local, luego toISOString() lo convierte a UTC
       const localDate = new Date(newEvent.fecha_hora);
+      
+      // Verificar que la fecha es válida
+      if (isNaN(localDate.getTime())) {
+        alert('Fecha u hora inválida');
+        return;
+      }
+      
       const fechaHoraISO = localDate.toISOString();
+      
+      console.log('Fecha local ingresada:', newEvent.fecha_hora);
+      console.log('Fecha convertida a UTC:', fechaHoraISO);
       
       if (editingEvent) {
         // Actualizar evento existente

@@ -1,0 +1,17 @@
+{
+    "name": "planeit-frontend",
+    "scripts": {
+        "dev": "vite --port 3000 --host"
+    },
+    "dependencies": {
+      "react": "^18.2.0",
+      "react-dom": "^18.2.0",
+      "@fullcalendar/react": "^6.1.10",
+      "@fullcalendar/daygrid": "^6.1.10",
+      "@fullcalendar/timegrid": "^6.1.10",
+      "axios": "^1.6.0"
+    },
+    "devDependencies": {
+      "vite": "^5.0.0"
+    }
+  }

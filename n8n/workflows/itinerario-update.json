@@ -1,0 +1,20 @@
+{
+  "name": "PlaneIt - Notificación Cambio Itinerario",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "itinerario-update",
+        "method": "POST",
+        "responseMode": "onReceived"
+      },
+      "name": "Webhook Cambio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    }
+  ],
+  "connections": {},
+  "active": true,
+  "settings": {},
+  "id": "1"
+}

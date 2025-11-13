@@ -10,10 +10,59 @@ CREATE TABLE usuarios (
 
 CREATE TABLE viajes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  nombre TEXT NOT NULL
+  nombre TEXT NOT NULL,
+  creado_por UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO viajes (id, nombre) VALUES ('11111111-1111-1111-1111-111111111111', 'Viaje Demo ITBA') ON CONFLICT (id) DO NOTHING;
+-- Tabla para gestionar acceso de usuarios a viajes
+CREATE TABLE viajes_usuarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
+  usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(viaje_id, usuario_id)
+);
+
+-- Tabla para solicitudes de unión a viajes
+CREATE TABLE solicitudes_unirse (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
+  solicitante_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+  estado TEXT DEFAULT 'pendiente', -- 'pendiente', 'aceptada', 'rechazada'
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(viaje_id, solicitante_id)
+);
+
+-- Agregar columnas si la tabla ya existe (para migración)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'viajes' AND column_name = 'creado_por'
+  ) THEN
+    ALTER TABLE viajes ADD COLUMN creado_por UUID REFERENCES usuarios(id) ON DELETE CASCADE;
+    ALTER TABLE viajes ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW();
+  END IF;
+END $$;
+
+-- Crear tablas si no existen (para migración)
+CREATE TABLE IF NOT EXISTS viajes_usuarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
+  usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(viaje_id, usuario_id)
+);
+
+CREATE TABLE IF NOT EXISTS solicitudes_unirse (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
+  solicitante_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+  estado TEXT DEFAULT 'pendiente',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(viaje_id, solicitante_id)
+);
 
 CREATE TABLE actividades (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

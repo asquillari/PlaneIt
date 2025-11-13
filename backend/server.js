@@ -34,17 +34,6 @@ async function connectWithRetry() {
   for (let i = 0; i < 15; i++) {
     try {
       await pool.query('SELECT 1');
-      
-      // Asegurar que el viaje demo existe
-      const demoViajeId = '11111111-1111-1111-1111-111111111111';
-      const viajeCheck = await pool.query('SELECT id FROM viajes WHERE id = $1', [demoViajeId]);
-      if (viajeCheck.rows.length === 0) {
-        await pool.query(
-          'INSERT INTO viajes (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
-          [demoViajeId, 'Viaje Demo ITBA']
-        );
-      }
-      
       return;
     } catch (err) {
       await new Promise(res => setTimeout(res, 3000));
@@ -183,9 +172,305 @@ app.post('/auth/logout', requireAuth, (req, res) => {
   res.json({ message: 'Sesión cerrada' });
 });
 
-app.get('/viajes/:viajeId/actividades', async (req, res) => {
+// Helper para verificar acceso a un viaje
+async function tieneAccesoViaje(usuarioId, viajeId) {
+  try {
+    // Verificar si es el creador
+    const creadorCheck = await pool.query(
+      'SELECT id FROM viajes WHERE id = $1 AND creado_por = $2',
+      [viajeId, usuarioId]
+    );
+    if (creadorCheck.rows.length > 0) {
+      return true;
+    }
+    
+    // Verificar si tiene acceso compartido
+    const accesoCheck = await pool.query(
+      'SELECT id FROM viajes_usuarios WHERE viaje_id = $1 AND usuario_id = $2',
+      [viajeId, usuarioId]
+    );
+    return accesoCheck.rows.length > 0;
+  } catch (err) {
+    return false;
+  }
+}
+
+// Crear nuevo viaje
+app.post('/viajes', requireAuth, async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    const usuarioId = req.user.id;
+    
+    if (!nombre || nombre.trim().length === 0) {
+      return res.status(400).json({ error: 'El nombre del viaje es requerido' });
+    }
+    
+    const { rows } = await pool.query(
+      'INSERT INTO viajes (nombre, creado_por) VALUES ($1, $2) RETURNING *',
+      [nombre.trim(), usuarioId]
+    );
+    
+    // Agregar al creador como usuario con acceso
+    await pool.query(
+      'INSERT INTO viajes_usuarios (viaje_id, usuario_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [rows[0].id, usuarioId]
+    );
+    
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Listar viajes del usuario (propios y compartidos)
+app.get('/viajes', requireAuth, async (req, res) => {
+  try {
+    const usuarioId = req.user.id;
+    
+    // Viajes creados por el usuario
+    const viajesCreados = await pool.query(
+      `SELECT v.*, 'creador' as rol 
+       FROM viajes v 
+       WHERE v.creado_por = $1 
+       ORDER BY v.created_at DESC`,
+      [usuarioId]
+    );
+    
+    // Viajes compartidos con el usuario
+    const viajesCompartidos = await pool.query(
+      `SELECT v.*, 'miembro' as rol 
+       FROM viajes v 
+       INNER JOIN viajes_usuarios vu ON v.id = vu.viaje_id 
+       WHERE vu.usuario_id = $1 AND v.creado_por != $1
+       ORDER BY vu.created_at DESC`,
+      [usuarioId]
+    );
+    
+    // Todos los viajes disponibles (para solicitar unirse)
+    const todosViajes = await pool.query(
+      `SELECT v.*, 
+        CASE 
+          WHEN v.creado_por = $1 THEN 'creador'
+          WHEN EXISTS (SELECT 1 FROM viajes_usuarios vu WHERE vu.viaje_id = v.id AND vu.usuario_id = $1) THEN 'miembro'
+          WHEN EXISTS (SELECT 1 FROM solicitudes_unirse su WHERE su.viaje_id = v.id AND su.solicitante_id = $1 AND su.estado = 'pendiente') THEN 'solicitado'
+          ELSE 'disponible'
+        END as estado
+       FROM viajes v 
+       ORDER BY v.created_at DESC`,
+      [usuarioId]
+    );
+    
+    res.json({
+      creados: viajesCreados.rows,
+      compartidos: viajesCompartidos.rows,
+      todos: todosViajes.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Solicitar unirse a un viaje
+app.post('/viajes/:viajeId/solicitar-unirse', requireAuth, async (req, res) => {
+  try {
+    const { viajeId } = req.params;
+    const usuarioId = req.user.id;
+    
+    // Verificar que el viaje existe
+    const viajeCheck = await pool.query('SELECT id, creado_por FROM viajes WHERE id = $1', [viajeId]);
+    if (viajeCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Viaje no encontrado' });
+    }
+    
+    // No puede solicitar unirse a su propio viaje
+    if (viajeCheck.rows[0].creado_por === usuarioId) {
+      return res.status(400).json({ error: 'Ya eres el creador de este viaje' });
+    }
+    
+    // Verificar si ya tiene acceso
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, viajeId);
+    if (tieneAcceso) {
+      return res.status(400).json({ error: 'Ya tienes acceso a este viaje' });
+    }
+    
+    // Verificar si ya existe una solicitud pendiente
+    const solicitudExistente = await pool.query(
+      'SELECT id FROM solicitudes_unirse WHERE viaje_id = $1 AND solicitante_id = $2 AND estado = $3',
+      [viajeId, usuarioId, 'pendiente']
+    );
+    
+    if (solicitudExistente.rows.length > 0) {
+      return res.status(400).json({ error: 'Ya existe una solicitud pendiente para este viaje' });
+    }
+    
+    // Crear solicitud
+    const { rows } = await pool.query(
+      'INSERT INTO solicitudes_unirse (viaje_id, solicitante_id) VALUES ($1, $2) RETURNING *',
+      [viajeId, usuarioId]
+    );
+    
+    // Notificar al creador del viaje
+    const creadorId = viajeCheck.rows[0].creado_por;
+    io.emit('solicitud_unirse', {
+      tipo: 'solicitud_unirse',
+      solicitud: rows[0],
+      solicitante: { id: req.user.id, username: req.user.username },
+      viaje: { id: viajeId, nombre: viajeCheck.rows[0].nombre || 'Viaje' },
+      creador_id: creadorId,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Obtener solicitudes pendientes (para el creador del viaje)
+app.get('/viajes/solicitudes', requireAuth, async (req, res) => {
+  try {
+    const usuarioId = req.user.id;
+    
+    // Obtener solicitudes de viajes donde el usuario es el creador
+    const { rows } = await pool.query(
+      `SELECT s.*, 
+        u.username as solicitante_username,
+        v.nombre as viaje_nombre
+       FROM solicitudes_unirse s
+       INNER JOIN viajes v ON s.viaje_id = v.id
+       INNER JOIN usuarios u ON s.solicitante_id = u.id
+       WHERE v.creado_por = $1 AND s.estado = 'pendiente'
+       ORDER BY s.created_at DESC`,
+      [usuarioId]
+    );
+    
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Aceptar solicitud de unión
+app.post('/viajes/solicitudes/:solicitudId/aceptar', requireAuth, async (req, res) => {
+  try {
+    const { solicitudId } = req.params;
+    const usuarioId = req.user.id;
+    
+    // Obtener la solicitud y verificar que el usuario es el creador del viaje
+    const solicitudCheck = await pool.query(
+      `SELECT s.*, v.creado_por, v.nombre as viaje_nombre, u.username as solicitante_username
+       FROM solicitudes_unirse s
+       INNER JOIN viajes v ON s.viaje_id = v.id
+       INNER JOIN usuarios u ON s.solicitante_id = u.id
+       WHERE s.id = $1 AND v.creado_por = $2 AND s.estado = 'pendiente'`,
+      [solicitudId, usuarioId]
+    );
+    
+    if (solicitudCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+    }
+    
+    const solicitud = solicitudCheck.rows[0];
+    
+    // Actualizar estado de la solicitud
+    await pool.query(
+      'UPDATE solicitudes_unirse SET estado = $1 WHERE id = $2',
+      ['aceptada', solicitudId]
+    );
+    
+    // Agregar usuario al viaje
+    await pool.query(
+      'INSERT INTO viajes_usuarios (viaje_id, usuario_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [solicitud.viaje_id, solicitud.solicitante_id]
+    );
+    
+    // Notificar al solicitante
+    io.emit('solicitud_aceptada', {
+      tipo: 'solicitud_aceptada',
+      solicitud: { ...solicitud, estado: 'aceptada' },
+      viaje: { id: solicitud.viaje_id, nombre: solicitud.viaje_nombre },
+      solicitante_id: solicitud.solicitante_id,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ message: 'Solicitud aceptada', solicitud: { ...solicitud, estado: 'aceptada' } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rechazar solicitud de unión
+app.post('/viajes/solicitudes/:solicitudId/rechazar', requireAuth, async (req, res) => {
+  try {
+    const { solicitudId } = req.params;
+    const usuarioId = req.user.id;
+    
+    // Obtener la solicitud y verificar que el usuario es el creador del viaje
+    const solicitudCheck = await pool.query(
+      `SELECT s.*, v.nombre as viaje_nombre, u.username as solicitante_username
+       FROM solicitudes_unirse s
+       INNER JOIN viajes v ON s.viaje_id = v.id
+       INNER JOIN usuarios u ON s.solicitante_id = u.id
+       WHERE s.id = $1 AND v.creado_por = $2 AND s.estado = 'pendiente'`,
+      [solicitudId, usuarioId]
+    );
+    
+    if (solicitudCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+    }
+    
+    const solicitud = solicitudCheck.rows[0];
+    
+    // Actualizar estado de la solicitud
+    await pool.query(
+      'UPDATE solicitudes_unirse SET estado = $1 WHERE id = $2',
+      ['rechazada', solicitudId]
+    );
+    
+    // Notificar al solicitante
+    io.emit('solicitud_rechazada', {
+      tipo: 'solicitud_rechazada',
+      solicitud: { ...solicitud, estado: 'rechazada' },
+      viaje: { id: solicitud.viaje_id, nombre: solicitud.viaje_nombre },
+      solicitante_id: solicitud.solicitante_id,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ message: 'Solicitud rechazada', solicitud: { ...solicitud, estado: 'rechazada' } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verificar acceso a un viaje
+app.get('/viajes/:viajeId/acceso', requireAuth, async (req, res) => {
+  try {
+    const { viajeId } = req.params;
+    const usuarioId = req.user.id;
+    
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, viajeId);
+    
+    if (!tieneAcceso) {
+      return res.status(403).json({ error: 'No tienes acceso a este viaje' });
+    }
+    
+    res.json({ tieneAcceso: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/viajes/:viajeId/actividades', requireAuth, async (req, res) => {
   try {
     const viajeId = req.params.viajeId;
+    const usuarioId = req.user.id;
+    
+    // Verificar acceso
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, viajeId);
+    if (!tieneAcceso) {
+      return res.status(403).json({ error: 'No tienes acceso a este viaje' });
+    }
+    
     const { rows } = await pool.query(
       'SELECT * FROM actividades WHERE viaje_id = $1 ORDER BY fecha_hora',
       [viajeId]
@@ -196,9 +481,10 @@ app.get('/viajes/:viajeId/actividades', async (req, res) => {
   }
 });
 
-app.post('/actividades', async (req, res) => {
+app.post('/actividades', requireAuth, async (req, res) => {
   try {
     const { viaje_id, titulo, fecha_hora, fecha_hora_fin, tipo = 'otro', direccion } = req.body;
+    const usuarioId = req.user.id;
     
     if (!viaje_id || !titulo || !fecha_hora) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
@@ -209,27 +495,16 @@ app.post('/actividades', async (req, res) => {
       return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
     }
     
-    // Verificar que el viaje existe, si no existe, crearlo
-    const viajeCheck = await pool.query('SELECT id FROM viajes WHERE id = $1', [viaje_id]);
-    if (viajeCheck.rows.length === 0) {
-      try {
-        await pool.query(
-          'INSERT INTO viajes (id, nombre) VALUES ($1, $2)',
-          [viaje_id, 'Viaje Demo ITBA']
-        );
-      } catch (createErr) {
-        // Si falla la creación, puede ser por constraint, intentar de nuevo
-        const retryCheck = await pool.query('SELECT id FROM viajes WHERE id = $1', [viaje_id]);
-        if (retryCheck.rows.length === 0) {
-          return res.status(500).json({ error: `Error al crear el viaje: ${createErr.message}` });
-        }
-      }
+    // Verificar acceso al viaje
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, viaje_id);
+    if (!tieneAcceso) {
+      return res.status(403).json({ error: 'No tienes acceso a este viaje' });
     }
     
     const { rows } = await pool.query(
       `INSERT INTO actividades (viaje_id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion, creado_por)
-       VALUES ($1, $2, $3, $4, $5, $6, 'demo') RETURNING *`,
-      [viaje_id, titulo, fecha_hora, fecha_hora_fin || null, tipo, direccion || null]
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [viaje_id, titulo, fecha_hora, fecha_hora_fin || null, tipo, direccion || null, req.user.username]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -237,10 +512,11 @@ app.post('/actividades', async (req, res) => {
   }
 });
 
-app.put('/actividades/:id', async (req, res) => {
+app.put('/actividades/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { titulo, fecha_hora, fecha_hora_fin, tipo, direccion } = req.body;
+    const usuarioId = req.user.id;
     
     if (!titulo || !fecha_hora) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
@@ -251,6 +527,18 @@ app.put('/actividades/:id', async (req, res) => {
       return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
     }
     
+    // Obtener la actividad para verificar acceso al viaje
+    const actividadCheck = await pool.query('SELECT viaje_id FROM actividades WHERE id = $1', [id]);
+    if (actividadCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Actividad no encontrada' });
+    }
+    
+    // Verificar acceso al viaje
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, actividadCheck.rows[0].viaje_id);
+    if (!tieneAcceso) {
+      return res.status(403).json({ error: 'No tienes acceso a este viaje' });
+    }
+    
     const { rows } = await pool.query(
       `UPDATE actividades 
        SET titulo = $1, fecha_hora = $2, fecha_hora_fin = $3, tipo = $4, direccion = $5
@@ -259,28 +547,33 @@ app.put('/actividades/:id', async (req, res) => {
       [titulo, fecha_hora, fecha_hora_fin || null, tipo, direccion || null, id]
     );
     
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Actividad no encontrada' });
-    }
-    
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.delete('/actividades/:id', async (req, res) => {
+app.delete('/actividades/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    const usuarioId = req.user.id;
+    
+    // Obtener la actividad para verificar acceso al viaje
+    const actividadCheck = await pool.query('SELECT viaje_id FROM actividades WHERE id = $1', [id]);
+    if (actividadCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Actividad no encontrada' });
+    }
+    
+    // Verificar acceso al viaje
+    const tieneAcceso = await tieneAccesoViaje(usuarioId, actividadCheck.rows[0].viaje_id);
+    if (!tieneAcceso) {
+      return res.status(403).json({ error: 'No tienes acceso a este viaje' });
+    }
     
     const { rows } = await pool.query(
       'DELETE FROM actividades WHERE id = $1 RETURNING *',
       [id]
     );
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Actividad no encontrada' });
-    }
     
     res.json({ message: 'Actividad eliminada exitosamente', actividad: rows[0] });
   } catch (err) {

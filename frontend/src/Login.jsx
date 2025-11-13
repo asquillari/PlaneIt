@@ -28,7 +28,7 @@ function Login({ onLogin }) {
       // Configurar axios para usar el token en todas las peticiones
       axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
 
-      onLogin(response.data.user);
+      onLogin(response.data.user, response.data.token);
     } catch (err) {
       setError(err.response?.data?.error || 'Error al iniciar sesión');
     } finally {

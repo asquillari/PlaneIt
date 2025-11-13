@@ -19,6 +19,7 @@ services:
     restart: always
     depends_on:
       - db
+      - n8n
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/planeit
       N8N_WEBHOOK_URL: http://n8n:5678/webhook/itinerario-update

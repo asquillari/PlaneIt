@@ -25,6 +25,7 @@ function App() {
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [conflictInfo, setConflictInfo] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
+  const [notifications, setNotifications] = useState([]);
   const [newEvent, setNewEvent] = useState({
     titulo: '',
     fecha_hora: '',
@@ -226,7 +227,7 @@ function App() {
     }
     
     if (errors.length > 0) {
-      alert('Por favor corrige los siguientes errores:\n\n' + errors.join('\n'));
+      showNotification('Campos requeridos', errors.join('\n'), 'warning');
       return;
     }
 
@@ -239,19 +240,19 @@ function App() {
       
       // Verificar que la fecha es válida
       if (isNaN(localDate.getTime())) {
-        alert('❌ Error: La fecha u hora de inicio no es válida');
+        showNotification('Error', 'La fecha u hora de inicio no es válida', 'error');
         return;
       }
       
       if (localDateFin) {
         if (isNaN(localDateFin.getTime())) {
-          alert('❌ Error: La fecha u hora de fin no es válida');
+          showNotification('Error', 'La fecha u hora de fin no es válida', 'error');
           return;
         }
         
         // Validar que la hora de fin sea posterior a la de inicio
         if (localDateFin <= localDate) {
-          alert('❌ Error: La hora de fin debe ser posterior a la hora de inicio');
+          showNotification('Error', 'La hora de fin debe ser posterior a la hora de inicio', 'error');
           return;
         }
       }
@@ -259,10 +260,9 @@ function App() {
       // Validar que la fecha no sea en el pasado (opcional, pero útil)
       const now = new Date();
       if (localDate < now) {
-        const confirmPast = window.confirm('⚠️ La fecha de inicio es en el pasado. ¿Deseas guardar de todas formas?');
-        if (!confirmPast) {
-          return;
-        }
+        // Usar notificación en lugar de confirm
+        showNotification('Advertencia', 'La fecha de inicio es en el pasado', 'warning');
+        // Continuar de todas formas, solo avisar
       }
       
       // Convertir a UTC usando toISOString() - JavaScript maneja la conversión automáticamente
@@ -293,8 +293,8 @@ function App() {
         });
       } else {
         // Crear nuevo evento
-        await axios.post('http://localhost:4000/actividades', {
-          viaje_id: viajeId,
+    await axios.post('http://localhost:4000/actividades', {
+      viaje_id: viajeId,
           titulo: newEvent.titulo,
           fecha_hora: fechaHoraISO,
           fecha_hora_fin: fechaHoraFinISO,
@@ -306,11 +306,19 @@ function App() {
       setIsModalOpen(false);
       setEditingEvent(null);
       setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
+      
+      // Mostrar notificación
+      showNotification(
+        editingEvent ? 'Evento actualizado' : 'Evento creado',
+        editingEvent ? `"${newEvent.titulo}" ha sido actualizado` : `"${newEvent.titulo}" ha sido creado`,
+        'success'
+      );
+      
       loadEvents();
     } catch (error) {
       console.error('Error guardando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
-      alert(`Error: ${errorMessage}`);
+      showNotification('Error', errorMessage, 'error');
     }
   };
 
@@ -322,16 +330,25 @@ function App() {
     if (!editingEvent) return;
 
     try {
+      const eventTitle = newEvent.titulo;
       await axios.delete(`http://localhost:4000/actividades/${editingEvent.id}`);
       setIsModalOpen(false);
       setIsDeleteModalOpen(false);
       setEditingEvent(null);
       setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
-      loadEvents();
+      
+      // Mostrar notificación
+      showNotification(
+        'Evento eliminado',
+        `"${eventTitle}" ha sido eliminado`,
+        'info'
+      );
+      
+    loadEvents();
     } catch (error) {
       console.error('Error eliminando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
-      alert(`Error al eliminar: ${errorMessage}`);
+      showNotification('Error', errorMessage, 'error');
     }
   };
 
@@ -347,6 +364,29 @@ function App() {
 
   const getStatsForType = (tipo) => {
     return events.filter(e => e.extendedProps.tipo === tipo).length;
+  };
+
+  // Sistema de notificaciones
+  const showNotification = (title, message, type = 'info') => {
+    const id = Date.now() + Math.random();
+    const notification = {
+      id,
+      title,
+      message,
+      type, // 'success', 'info', 'warning', 'error'
+      timestamp: new Date()
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    
+    // Auto-eliminar después de 5 segundos
+    setTimeout(() => {
+      removeNotification(id);
+    }, 5000);
+  };
+
+  const removeNotification = (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   const handleLogin = (userData) => {
@@ -600,13 +640,12 @@ function App() {
         <div className="modal-overlay" onClick={handleDeleteCancel}>
           <div className="modal-content delete-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Confirmar Eliminación</h2>
+              <h2>Eliminar evento</h2>
               <button className="modal-close" onClick={handleDeleteCancel}>×</button>
             </div>
             <div className="delete-modal-content">
-              <div className="delete-icon">🗑️</div>
-              <p>¿Estás seguro de que quieres eliminar el evento <strong>"{newEvent.titulo}"</strong>?</p>
-              <p className="delete-warning">Esta acción no se puede deshacer.</p>
+              <p>¿Desea eliminar <strong>"{newEvent.titulo}"</strong>?</p>
+              <p className="delete-warning">Si acepta, no podrá deshacer esta eliminación.</p>
             </div>
             <div className="modal-actions">
               <button 
@@ -636,7 +675,6 @@ function App() {
               <button className="modal-close" onClick={() => setIsConflictModalOpen(false)}>×</button>
             </div>
             <div className="delete-modal-content">
-              <div className="delete-icon">⚠️</div>
               <p>{conflictInfo.error}</p>
               {conflictInfo.conflicts && conflictInfo.conflicts.length > 0 && (
                 <div style={{ marginTop: '16px', textAlign: 'left' }}>
@@ -699,11 +737,19 @@ function App() {
                     setIsModalOpen(false);
                     setEditingEvent(null);
                     setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
+                    
+                    // Mostrar notificación
+                    showNotification(
+                      editingEvent ? 'Evento actualizado' : 'Evento creado',
+                      editingEvent ? `"${newEvent.titulo}" ha sido actualizado` : `"${newEvent.titulo}" ha sido creado`,
+                      'success'
+                    );
+                    
                     loadEvents();
                   } catch (error) {
                     console.error('Error guardando evento:', error);
                     const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
-                    alert(`Error: ${errorMessage}`);
+                    showNotification('Error', errorMessage, 'error');
                   }
                 }}
               >
@@ -713,6 +759,37 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Sistema de Notificaciones */}
+      <div className="notifications-container">
+        {notifications.map(notification => (
+          <div 
+            key={notification.id} 
+            className={`notification notification-${notification.type}`}
+            onClick={() => removeNotification(notification.id)}
+          >
+            <div className="notification-icon">
+              {notification.type === 'success' && '✅'}
+              {notification.type === 'info' && 'ℹ️'}
+              {notification.type === 'warning' && '⚠️'}
+              {notification.type === 'error' && '❌'}
+            </div>
+            <div className="notification-content">
+              <div className="notification-title">{notification.title}</div>
+              <div className="notification-message">{notification.message}</div>
+            </div>
+            <button 
+              className="notification-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeNotification(notification.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

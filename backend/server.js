@@ -57,10 +57,29 @@ async function setupListener() {
   listener.on('notification', async (msg) => {
     try {
       const payload = JSON.parse(msg.payload);
-      await axios.post("http://n8n:5678/webhook/itinerario-update", payload);
-    } catch (e) {}
+      console.log('📢 Notificación recibida de PostgreSQL, enviando a n8n...', payload);
+      
+      // La URL del webhook de n8n puede ser:
+      // - http://n8n:5678/webhook/itinerario-update (si el path está configurado como "itinerario-update")
+      // - http://n8n:5678/webhook/[workflow-id] (si usas el ID del workflow)
+      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || "http://n8n:5678/webhook/itinerario-update";
+      
+      await axios.post(n8nWebhookUrl, payload, {
+        timeout: 5000,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log('✅ Notificación enviada exitosamente a n8n');
+    } catch (e) {
+      console.error('❌ Error enviando notificación a n8n:', e.message);
+      if (e.response) {
+        console.error('   Status:', e.response.status);
+        console.error('   Data:', e.response.data);
+      }
+    }
   });
-  console.log('Escuchando cambios en tiempo real');
+  console.log('✅ Escuchando cambios en tiempo real (PostgreSQL LISTEN/NOTIFY)');
 }
 
 // Middleware de autenticación

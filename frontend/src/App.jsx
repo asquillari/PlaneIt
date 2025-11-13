@@ -4,6 +4,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import axios from 'axios';
+import Login from './Login';
 import './App.css';
 
 const EVENT_TYPES = {
@@ -17,6 +18,7 @@ const EVENT_TYPES = {
 };
 
 function App() {
+  const [user, setUser] = useState(null);
   const [events, setEvents] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -27,24 +29,50 @@ function App() {
   });
   const viajeId = "11111111-1111-1111-1111-111111111111"; // demo
 
+  // Verificar autenticación al cargar
   useEffect(() => {
-    loadEvents();
-    const interval = setInterval(loadEvents, 3000);
-    return () => clearInterval(interval);
+    const token = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+    
+    if (token && savedUser) {
+      // Configurar axios con el token
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Verificar que el token sigue siendo válido
+      axios.get('http://localhost:4000/auth/me')
+        .then(response => {
+          setUser(response.data.user);
+        })
+        .catch(() => {
+          // Token inválido, limpiar
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          delete axios.defaults.headers.common['Authorization'];
+        });
+    }
   }, []);
+
+  // Cargar eventos solo si está autenticado
+  useEffect(() => {
+    if (user) {
+      loadEvents();
+      const interval = setInterval(loadEvents, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   const loadEvents = async () => {
     try {
-      const res = await axios.get(`http://localhost:4000/viajes/${viajeId}/actividades`);
-      setEvents(res.data.map(a => ({
+    const res = await axios.get(`http://localhost:4000/viajes/${viajeId}/actividades`);
+    setEvents(res.data.map(a => ({
         id: a.id,
         title: a.titulo,
-        start: a.fecha_hora,
+      start: a.fecha_hora,
         extendedProps: { tipo: a.tipo },
         backgroundColor: getColorForType(a.tipo),
         borderColor: getColorForType(a.tipo),
         textColor: '#fff'
-      })));
+    })));
     } catch (error) {
       console.error('Error cargando eventos:', error);
     }
@@ -138,8 +166,8 @@ function App() {
         });
       } else {
         // Crear nuevo evento
-        await axios.post('http://localhost:4000/actividades', {
-          viaje_id: viajeId,
+    await axios.post('http://localhost:4000/actividades', {
+      viaje_id: viajeId,
           titulo: newEvent.titulo,
           fecha_hora: fechaHoraISO,
           tipo: newEvent.tipo
@@ -169,7 +197,7 @@ function App() {
       setIsModalOpen(false);
       setEditingEvent(null);
       setNewEvent({ titulo: '', fecha_hora: '', tipo: 'otro' });
-      loadEvents();
+    loadEvents();
     } catch (error) {
       console.error('Error eliminando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
@@ -187,49 +215,81 @@ function App() {
     return events.filter(e => e.extendedProps.tipo === tipo).length;
   };
 
+  const handleLogin = (userData) => {
+    setUser(userData);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await axios.post('http://localhost:4000/auth/logout');
+    } catch (err) {
+      console.error('Error al cerrar sesión:', err);
+    }
+    
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    delete axios.defaults.headers.common['Authorization'];
+    setUser(null);
+  };
+
+  // Mostrar login si no está autenticado
+  if (!user) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
     <div className="app-container">
-      <header className="app-header">
-        <div className="header-content">
-          <div className="logo-section">
-            <span className="logo-icon">🗓️</span>
-            <h1 className="app-title">PlaneIt</h1>
-            <span className="app-subtitle">Calendario de Viaje</span>
+        <header className="app-header">
+          <div className="header-content">
+            <div className="logo-section">
+              <span className="logo-icon">🗓️</span>
+              <h1 className="app-title">PlaneIt</h1>
+              <span className="app-subtitle">Calendario de Viaje</span>
+            </div>
+            <div className="header-actions">
+              <span className="user-info">👤 {user.username}</span>
+              <button 
+                className="btn-primary"
+                onClick={() => {
+                  const now = new Date();
+                  const dateStr = now.toISOString().slice(0, 10);
+                  const timeStr = now.toTimeString().slice(0, 5);
+                  setEditingEvent(null);
+                  setNewEvent({
+                    titulo: '',
+                    fecha_hora: `${dateStr}T${timeStr}`,
+                    tipo: 'otro'
+                  });
+                  setIsModalOpen(true);
+                }}
+              >
+                <span className="btn-icon">+</span>
+                Crear Evento
+              </button>
+              <button 
+                className="btn-secondary"
+                onClick={handleLogout}
+                style={{ marginLeft: '12px' }}
+              >
+                Salir
+              </button>
+            </div>
           </div>
-          <button 
-            className="btn-primary"
-            onClick={() => {
-              const now = new Date();
-              const dateStr = now.toISOString().slice(0, 10);
-              const timeStr = now.toTimeString().slice(0, 5);
-              setEditingEvent(null);
-              setNewEvent({
-                titulo: '',
-                fecha_hora: `${dateStr}T${timeStr}`,
-                tipo: 'otro'
-              });
-              setIsModalOpen(true);
-            }}
-          >
-            <span className="btn-icon">+</span>
-            Crear Evento
-          </button>
-        </div>
-      </header>
+        </header>
 
       <main className="app-main">
         <div className="calendar-container">
-          <FullCalendar
+      <FullCalendar
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-            initialView="dayGridMonth"
-            events={events}
+        initialView="dayGridMonth"
+        events={events}
             editable={false}
             selectable={true}
             dateClick={handleDateClick}
             eventClick={handleEventClick}
-            headerToolbar={{
-              left: 'prev,next today',
-              center: 'title',
+        headerToolbar={{
+          left: 'prev,next today',
+          center: 'title',
               right: 'dayGridMonth,timeGridWeek,timeGridDay'
             }}
             locale="es"

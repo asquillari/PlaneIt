@@ -61,6 +61,19 @@ body {
   font-weight: 400;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-info {
+  color: white;
+  font-size: 15px;
+  font-weight: 500;
+  margin-right: 8px;
+}
+
 .btn-primary {
   display: flex;
   align-items: center;

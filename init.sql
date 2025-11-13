@@ -1,6 +1,13 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+CREATE TABLE usuarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE viajes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   nombre TEXT NOT NULL

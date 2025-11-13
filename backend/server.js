@@ -2,10 +2,18 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const axios = require('axios');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
+
+// Almacenamiento simple de sesiones en memoria (en producción usar Redis o similar)
+const sessions = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -54,6 +62,115 @@ async function setupListener() {
   });
   console.log('Escuchando cambios en tiempo real');
 }
+
+// Middleware de autenticación
+const requireAuth = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
+  if (!token || !sessions.has(token)) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  req.user = sessions.get(token);
+  next();
+};
+
+// Endpoint de registro
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+    }
+    
+    if (username.length < 3) {
+      return res.status(400).json({ error: 'El usuario debe tener al menos 3 caracteres' });
+    }
+    
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+    }
+    
+    // Verificar si el usuario ya existe
+    const existingUser = await pool.query('SELECT id FROM usuarios WHERE username = $1', [username]);
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'El usuario ya existe' });
+    }
+    
+    // Hashear contraseña
+    const passwordHash = await bcrypt.hash(password, 10);
+    
+    // Crear usuario
+    const { rows } = await pool.query(
+      'INSERT INTO usuarios (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+      [username, passwordHash]
+    );
+    
+    // Crear sesión
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { id: rows[0].id, username: rows[0].username });
+    
+    res.json({ 
+      token, 
+      user: { id: rows[0].id, username: rows[0].username } 
+    });
+  } catch (err) {
+    console.error('Error en registro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint de login
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+    }
+    
+    // Buscar usuario
+    const { rows } = await pool.query(
+      'SELECT id, username, password_hash FROM usuarios WHERE username = $1',
+      [username]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+    
+    // Verificar contraseña
+    const isValid = await bcrypt.compare(password, rows[0].password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+    
+    // Crear sesión
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { id: rows[0].id, username: rows[0].username });
+    
+    res.json({ 
+      token, 
+      user: { id: rows[0].id, username: rows[0].username } 
+    });
+  } catch (err) {
+    console.error('Error en login:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para verificar sesión
+app.get('/auth/me', requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// Endpoint de logout
+app.post('/auth/logout', requireAuth, (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
+  if (token) {
+    sessions.delete(token);
+  }
+  res.json({ message: 'Sesión cerrada' });
+});
 
 app.get('/viajes/:viajeId/actividades', async (req, res) => {
   try {

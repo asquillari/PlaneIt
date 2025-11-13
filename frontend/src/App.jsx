@@ -21,6 +21,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [events, setEvents] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [newEvent, setNewEvent] = useState({
     titulo: '',
@@ -185,24 +186,29 @@ function App() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDeleteClick = () => {
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
     if (!editingEvent) return;
-    
-    if (!confirm(`¿Estás seguro de que quieres eliminar "${newEvent.titulo}"?`)) {
-      return;
-    }
 
     try {
       await axios.delete(`http://localhost:4000/actividades/${editingEvent.id}`);
       setIsModalOpen(false);
+      setIsDeleteModalOpen(false);
       setEditingEvent(null);
       setNewEvent({ titulo: '', fecha_hora: '', tipo: 'otro' });
-    loadEvents();
+      loadEvents();
     } catch (error) {
       console.error('Error eliminando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
       alert(`Error al eliminar: ${errorMessage}`);
     }
+  };
+
+  const handleDeleteCancel = () => {
+    setIsDeleteModalOpen(false);
   };
 
   const closeModal = () => {
@@ -242,34 +248,17 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="logo-section">
-              <span className="logo-icon">🗓️</span>
               <h1 className="app-title">PlaneIt</h1>
-              <span className="app-subtitle">Calendario de Viaje</span>
             </div>
             <div className="header-actions">
-              <span className="user-info">👤 {user.username}</span>
+              <div className="user-badge">
+                <span className="user-avatar">{user.username.charAt(0).toUpperCase()}</span>
+                <span className="user-name">{user.username}</span>
+              </div>
               <button 
-                className="btn-primary"
-                onClick={() => {
-                  const now = new Date();
-                  const dateStr = now.toISOString().slice(0, 10);
-                  const timeStr = now.toTimeString().slice(0, 5);
-                  setEditingEvent(null);
-                  setNewEvent({
-                    titulo: '',
-                    fecha_hora: `${dateStr}T${timeStr}`,
-                    tipo: 'otro'
-                  });
-                  setIsModalOpen(true);
-                }}
-              >
-                <span className="btn-icon">+</span>
-                Crear Evento
-              </button>
-              <button 
-                className="btn-secondary"
+                className="btn-logout"
                 onClick={handleLogout}
-                style={{ marginLeft: '12px' }}
+                title="Cerrar sesión"
               >
                 Salir
               </button>
@@ -315,47 +304,57 @@ function App() {
 
         <div className="sidebar">
           <div className="sidebar-section">
-            <h3 className="sidebar-title">Tipos de Eventos</h3>
+            <div className="quick-actions">
+              <button 
+                className="btn-add-event"
+                onClick={() => {
+                  const now = new Date();
+                  const dateStr = now.toISOString().slice(0, 10);
+                  const timeStr = now.toTimeString().slice(0, 5);
+                  setEditingEvent(null);
+                  setNewEvent({
+                    titulo: '',
+                    fecha_hora: `${dateStr}T${timeStr}`,
+                    tipo: 'otro'
+                  });
+                  setIsModalOpen(true);
+                }}
+              >
+                <span className="btn-add-icon">+</span>
+                Nuevo evento
+              </button>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Resumen</h3>
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-value">{events.length}</div>
+                <div className="stat-label">Eventos totales</div>
+              </div>
+              {Object.entries(EVENT_TYPES).map(([key, value]) => {
+                const count = getStatsForType(key);
+                if (count === 0) return null;
+                return (
+                  <div key={key} className="stat-card">
+                    <div className="stat-value" style={{ color: value.color }}>{count}</div>
+                    <div className="stat-label">{value.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Tipos</h3>
             <div className="legend">
               {Object.entries(EVENT_TYPES).map(([key, value]) => (
                 <div key={key} className="legend-item">
-                  <span className="legend-color" style={{ backgroundColor: value.color }}></span>
-                  <span className="legend-icon">{value.icon}</span>
-                  <span>{value.label}</span>
+                  <span className="legend-dot" style={{ backgroundColor: value.color }}></span>
+                  <span className="legend-label">{value.label}</span>
                 </div>
               ))}
-            </div>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="info-card">
-              <div className="info-icon">🔄</div>
-              <div className="info-content">
-                <h4>Sincronización en Tiempo Real</h4>
-                <p>Los cambios se actualizan automáticamente cada 3 segundos</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="stats-card">
-              <h4>Resumen</h4>
-              <div className="stats">
-                <div className="stat-item">
-                  <span className="stat-number">{events.length}</span>
-                  <span className="stat-label">Total eventos</span>
-                </div>
-                {Object.entries(EVENT_TYPES).map(([key, value]) => {
-                  const count = getStatsForType(key);
-                  if (count === 0) return null;
-                  return (
-                    <div key={key} className="stat-item">
-                      <span className="stat-number">{count}</span>
-                      <span className="stat-label">{value.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           </div>
         </div>
@@ -412,7 +411,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn-danger" 
-                    onClick={handleDelete}
+                    onClick={handleDeleteClick}
                   >
                     Eliminar
                   </button>
@@ -427,6 +426,38 @@ function App() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isDeleteModalOpen && (
+        <div className="modal-overlay" onClick={handleDeleteCancel}>
+          <div className="modal-content delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Confirmar Eliminación</h2>
+              <button className="modal-close" onClick={handleDeleteCancel}>×</button>
+            </div>
+            <div className="delete-modal-content">
+              <div className="delete-icon">🗑️</div>
+              <p>¿Estás seguro de que quieres eliminar el evento <strong>"{newEvent.titulo}"</strong>?</p>
+              <p className="delete-warning">Esta acción no se puede deshacer.</p>
+            </div>
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={handleDeleteCancel}
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                className="btn-danger" 
+                onClick={handleDeleteConfirm}
+              >
+                Eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

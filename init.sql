@@ -20,10 +20,30 @@ CREATE TABLE actividades (
   viaje_id UUID REFERENCES viajes(id) ON DELETE CASCADE,
   titulo TEXT NOT NULL,
   fecha_hora TIMESTAMPTZ NOT NULL,
+  fecha_hora_fin TIMESTAMPTZ,
   tipo TEXT DEFAULT 'actividad',
+  direccion TEXT,
   creado_por TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Agregar columnas si la tabla ya existe (para migración)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'actividades' AND column_name = 'fecha_hora_fin'
+  ) THEN
+    ALTER TABLE actividades ADD COLUMN fecha_hora_fin TIMESTAMPTZ;
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'actividades' AND column_name = 'direccion'
+  ) THEN
+    ALTER TABLE actividades ADD COLUMN direccion TEXT;
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION notify_n8n()
 RETURNS TRIGGER AS $$

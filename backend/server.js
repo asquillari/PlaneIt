@@ -190,8 +190,17 @@ app.get('/viajes/:viajeId/actividades', async (req, res) => {
 
 app.post('/actividades', async (req, res) => {
   try {
-    const { viaje_id, titulo, fecha_hora, tipo = 'otro' } = req.body;
-    console.log('POST /actividades - Recibido:', { viaje_id, titulo, fecha_hora, tipo });
+    const { viaje_id, titulo, fecha_hora, fecha_hora_fin, tipo = 'otro', direccion } = req.body;
+    console.log('POST /actividades - Recibido:', { viaje_id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion });
+    
+    if (!viaje_id || !titulo || !fecha_hora) {
+      return res.status(400).json({ error: 'Faltan campos requeridos' });
+    }
+    
+    // Validar que fecha_hora_fin sea posterior a fecha_hora si se proporciona
+    if (fecha_hora_fin && new Date(fecha_hora_fin) <= new Date(fecha_hora)) {
+      return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
+    }
     
     // Verificar que el viaje existe, si no existe, crearlo
     const viajeCheck = await pool.query('SELECT id FROM viajes WHERE id = $1', [viaje_id]);
@@ -214,9 +223,9 @@ app.post('/actividades', async (req, res) => {
     }
     
     const { rows } = await pool.query(
-      `INSERT INTO actividades (viaje_id, titulo, fecha_hora, tipo, creado_por)
-       VALUES ($1, $2, $3, $4, 'demo') RETURNING *`,
-      [viaje_id, titulo, fecha_hora, tipo]
+      `INSERT INTO actividades (viaje_id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion, creado_por)
+       VALUES ($1, $2, $3, $4, $5, $6, 'demo') RETURNING *`,
+      [viaje_id, titulo, fecha_hora, fecha_hora_fin || null, tipo, direccion || null]
     );
     console.log('Evento creado exitosamente:', rows[0]);
     res.json(rows[0]);
@@ -230,15 +239,24 @@ app.post('/actividades', async (req, res) => {
 app.put('/actividades/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { titulo, fecha_hora, tipo } = req.body;
-    console.log('PUT /actividades/:id - Recibido:', { id, titulo, fecha_hora, tipo });
+    const { titulo, fecha_hora, fecha_hora_fin, tipo, direccion } = req.body;
+    console.log('PUT /actividades/:id - Recibido:', { id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion });
+    
+    if (!titulo || !fecha_hora) {
+      return res.status(400).json({ error: 'Faltan campos requeridos' });
+    }
+    
+    // Validar que fecha_hora_fin sea posterior a fecha_hora si se proporciona
+    if (fecha_hora_fin && new Date(fecha_hora_fin) <= new Date(fecha_hora)) {
+      return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
+    }
     
     const { rows } = await pool.query(
       `UPDATE actividades 
-       SET titulo = $1, fecha_hora = $2, tipo = $3 
-       WHERE id = $4 
+       SET titulo = $1, fecha_hora = $2, fecha_hora_fin = $3, tipo = $4, direccion = $5
+       WHERE id = $6 
        RETURNING *`,
-      [titulo, fecha_hora, tipo, id]
+      [titulo, fecha_hora, fecha_hora_fin || null, tipo, direccion || null, id]
     );
     
     if (rows.length === 0) {

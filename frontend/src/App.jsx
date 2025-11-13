@@ -22,11 +22,15 @@ function App() {
   const [events, setEvents] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+  const [conflictInfo, setConflictInfo] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [newEvent, setNewEvent] = useState({
     titulo: '',
     fecha_hora: '',
-    tipo: 'otro'
+    fecha_hora_fin: '',
+    tipo: 'otro',
+    direccion: ''
   });
   const viajeId = "11111111-1111-1111-1111-111111111111"; // demo
 
@@ -65,15 +69,31 @@ function App() {
   const loadEvents = async () => {
     try {
     const res = await axios.get(`http://localhost:4000/viajes/${viajeId}/actividades`);
-    setEvents(res.data.map(a => ({
+    setEvents(res.data.map(a => {
+      let fechaHora = a.fecha_hora;
+      if (typeof fechaHora === 'string' && !fechaHora.endsWith('Z') && !fechaHora.includes('+') && !fechaHora.includes('-', 10)) {
+        fechaHora = fechaHora + 'Z';
+      }
+      
+      let fechaHoraFin = a.fecha_hora_fin;
+      if (fechaHoraFin && typeof fechaHoraFin === 'string' && !fechaHoraFin.endsWith('Z') && !fechaHoraFin.includes('+') && !fechaHoraFin.includes('-', 10)) {
+        fechaHoraFin = fechaHoraFin + 'Z';
+      }
+      
+      return {
         id: a.id,
         title: a.titulo,
-      start: a.fecha_hora,
-        extendedProps: { tipo: a.tipo },
+        start: fechaHora,
+        end: fechaHoraFin || null,
+        extendedProps: { 
+          tipo: a.tipo,
+          direccion: a.direccion || null
+        },
         backgroundColor: getColorForType(a.tipo),
         borderColor: getColorForType(a.tipo),
         textColor: '#fff'
-    })));
+      };
+    }));
     } catch (error) {
       console.error('Error cargando eventos:', error);
     }
@@ -104,11 +124,14 @@ function App() {
   const handleDateClick = (arg) => {
     const dateStr = arg.dateStr;
     const timeStr = arg.date.toTimeString().slice(0, 5);
+    
     setEditingEvent(null);
     setNewEvent({
       titulo: '',
       fecha_hora: `${dateStr}T${timeStr}`,
-      tipo: 'otro'
+      fecha_hora_fin: '', // Vacío por defecto, el usuario lo completa si quiere
+      tipo: 'otro',
+      direccion: ''
     });
     setIsModalOpen(true);
   };
@@ -117,67 +140,172 @@ function App() {
     const event = info.event;
     // event.start ya está en la zona horaria local de FullCalendar
     const fecha = new Date(event.start);
+    const fechaFin = event.end ? new Date(event.end) : null;
     
     // Convertir a formato datetime-local sin cambiar la zona horaria
     const fechaLocal = dateToLocalDateTime(fecha);
+    const fechaFinLocal = fechaFin ? dateToLocalDateTime(fechaFin) : '';
     
     setEditingEvent({
       id: event.id,
       titulo: event.title,
       fecha_hora: fechaLocal,
-      tipo: event.extendedProps.tipo
+      fecha_hora_fin: fechaFinLocal,
+      tipo: event.extendedProps.tipo,
+      direccion: event.extendedProps.direccion || ''
     });
     setNewEvent({
       titulo: event.title,
       fecha_hora: fechaLocal,
-      tipo: event.extendedProps.tipo
+      fecha_hora_fin: fechaFinLocal,
+      tipo: event.extendedProps.tipo,
+      direccion: event.extendedProps.direccion || ''
     });
     setIsModalOpen(true);
   };
 
+  // Función para verificar solapamientos
+  const checkOverlap = (start, end, excludeId = null) => {
+    const newStart = new Date(start);
+    const newEnd = end ? new Date(end) : null;
+    
+    // Verificar que la hora de fin sea posterior a la de inicio si se proporciona
+    if (newEnd && newEnd <= newStart) {
+      return { error: 'La hora de fin debe ser posterior a la hora de inicio' };
+    }
+    
+    // Si no hay hora de fin, verificar solapamiento con eventos que tengan la misma hora de inicio
+    // o que contengan esa hora
+    const overlapping = events.filter(event => {
+      if (excludeId && event.id === excludeId) return false;
+      
+      const eventStart = new Date(event.start);
+      const eventEnd = event.end ? new Date(event.end) : null;
+      
+      if (newEnd) {
+        // Si el nuevo evento tiene hora de fin, verificar solapamiento completo
+        const eventEndForComparison = eventEnd || new Date(eventStart.getTime() + 60 * 60 * 1000);
+        return (newStart < eventEndForComparison && newEnd > eventStart);
+      } else {
+        // Si el nuevo evento NO tiene hora de fin, verificar si hay eventos que:
+        // - Tienen la misma hora de inicio, O
+        // - Contienen esa hora en su rango
+        if (eventEnd) {
+          // Evento existente tiene hora de fin: verificar si la hora de inicio del nuevo está dentro
+          return (newStart >= eventStart && newStart < eventEnd);
+        } else {
+          // Ambos son eventos sin hora de fin: verificar si tienen la misma hora de inicio
+          return (newStart.getTime() === eventStart.getTime());
+        }
+      }
+    });
+    
+    if (overlapping.length > 0) {
+      const conflictNames = overlapping.map(e => e.title).join(', ');
+      return { 
+        error: `Ya tienes eventos en este horario: ${conflictNames}`,
+        conflicts: overlapping
+      };
+    }
+    
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!newEvent.titulo.trim() || !newEvent.fecha_hora) {
-      alert('Por favor completa todos los campos');
+    
+    // Validaciones mejoradas
+    const errors = [];
+    
+    if (!newEvent.titulo.trim()) {
+      errors.push('El título del evento es requerido');
+    }
+    
+    if (!newEvent.fecha_hora) {
+      errors.push('La fecha y hora de inicio es requerida');
+    }
+    
+    if (errors.length > 0) {
+      alert('Por favor corrige los siguientes errores:\n\n' + errors.join('\n'));
       return;
     }
 
     try {
       // datetime-local devuelve "YYYY-MM-DDTHH:mm" en hora local (sin zona horaria)
-      // new Date() interpreta esto como hora local, luego toISOString() lo convierte a UTC
+      // new Date() interpreta esto como hora local del navegador
+      // toISOString() automáticamente convierte a UTC
       const localDate = new Date(newEvent.fecha_hora);
+      const localDateFin = newEvent.fecha_hora_fin ? new Date(newEvent.fecha_hora_fin) : null;
       
       // Verificar que la fecha es válida
       if (isNaN(localDate.getTime())) {
-        alert('Fecha u hora inválida');
+        alert('❌ Error: La fecha u hora de inicio no es válida');
         return;
       }
       
-      const fechaHoraISO = localDate.toISOString();
+      if (localDateFin) {
+        if (isNaN(localDateFin.getTime())) {
+          alert('❌ Error: La fecha u hora de fin no es válida');
+          return;
+        }
+        
+        // Validar que la hora de fin sea posterior a la de inicio
+        if (localDateFin <= localDate) {
+          alert('❌ Error: La hora de fin debe ser posterior a la hora de inicio');
+          return;
+        }
+      }
       
+      // Validar que la fecha no sea en el pasado (opcional, pero útil)
+      const now = new Date();
+      if (localDate < now) {
+        const confirmPast = window.confirm('⚠️ La fecha de inicio es en el pasado. ¿Deseas guardar de todas formas?');
+        if (!confirmPast) {
+          return;
+        }
+      }
+      
+      // Convertir a UTC usando toISOString() - JavaScript maneja la conversión automáticamente
+      const fechaHoraISO = localDate.toISOString();
+      const fechaHoraFinISO = localDateFin ? localDateFin.toISOString() : null;
+      
+      // Verificar solapamientos antes de guardar
+      const overlapCheck = checkOverlap(fechaHoraISO, fechaHoraFinISO, editingEvent?.id);
+      if (overlapCheck && overlapCheck.error) {
+        setConflictInfo(overlapCheck);
+        setIsConflictModalOpen(true);
+        return; // Esperar confirmación del usuario
+      }
+      
+      // Guardar el evento (sin conflictos)
       console.log('Fecha local ingresada:', newEvent.fecha_hora);
       console.log('Fecha convertida a UTC:', fechaHoraISO);
+      console.log('Fecha fin convertida a UTC:', fechaHoraFinISO);
       
       if (editingEvent) {
         // Actualizar evento existente
         await axios.put(`http://localhost:4000/actividades/${editingEvent.id}`, {
           titulo: newEvent.titulo,
           fecha_hora: fechaHoraISO,
-          tipo: newEvent.tipo
+          fecha_hora_fin: fechaHoraFinISO,
+          tipo: newEvent.tipo,
+          direccion: newEvent.direccion.trim() || null
         });
       } else {
         // Crear nuevo evento
-    await axios.post('http://localhost:4000/actividades', {
-      viaje_id: viajeId,
+        await axios.post('http://localhost:4000/actividades', {
+          viaje_id: viajeId,
           titulo: newEvent.titulo,
           fecha_hora: fechaHoraISO,
-          tipo: newEvent.tipo
+          fecha_hora_fin: fechaHoraFinISO,
+          tipo: newEvent.tipo,
+          direccion: newEvent.direccion.trim() || null
         });
       }
       
       setIsModalOpen(false);
       setEditingEvent(null);
-      setNewEvent({ titulo: '', fecha_hora: '', tipo: 'otro' });
+      setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
       loadEvents();
     } catch (error) {
       console.error('Error guardando evento:', error);
@@ -198,7 +326,7 @@ function App() {
       setIsModalOpen(false);
       setIsDeleteModalOpen(false);
       setEditingEvent(null);
-      setNewEvent({ titulo: '', fecha_hora: '', tipo: 'otro' });
+      setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
       loadEvents();
     } catch (error) {
       console.error('Error eliminando evento:', error);
@@ -214,7 +342,7 @@ function App() {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingEvent(null);
-    setNewEvent({ titulo: '', fecha_hora: '', tipo: 'otro' });
+    setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro' });
   };
 
   const getStatsForType = (tipo) => {
@@ -315,7 +443,9 @@ function App() {
                   setNewEvent({
                     titulo: '',
                     fecha_hora: `${dateStr}T${timeStr}`,
-                    tipo: 'otro'
+                    fecha_hora_fin: '', // Vacío por defecto
+                    tipo: 'otro',
+                    direccion: ''
                   });
                   setIsModalOpen(true);
                 }}
@@ -381,7 +511,7 @@ function App() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="fecha_hora">Fecha y hora</label>
+                <label htmlFor="fecha_hora">Fecha y hora de inicio</label>
                 <input
                   type="datetime-local"
                   id="fecha_hora"
@@ -389,6 +519,31 @@ function App() {
                   onChange={(e) => setNewEvent({ ...newEvent, fecha_hora: e.target.value })}
                   required
                 />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="fecha_hora_fin">Fecha y hora de fin (opcional)</label>
+                <input
+                  type="datetime-local"
+                  id="fecha_hora_fin"
+                  value={newEvent.fecha_hora_fin}
+                  onChange={(e) => setNewEvent({ ...newEvent, fecha_hora_fin: e.target.value })}
+                  min={newEvent.fecha_hora}
+                />
+                {newEvent.fecha_hora_fin && newEvent.fecha_hora && (
+                  <small style={{ color: '#6b7280', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                    Duración: {(() => {
+                      const start = new Date(newEvent.fecha_hora);
+                      const end = new Date(newEvent.fecha_hora_fin);
+                      const diff = (end - start) / (1000 * 60); // minutos
+                      if (diff <= 0) return 'Inválida';
+                      if (diff < 60) return `${Math.round(diff)} minutos`;
+                      const hours = Math.floor(diff / 60);
+                      const mins = Math.round(diff % 60);
+                      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+                    })()}
+                  </small>
+                )}
               </div>
 
               <div className="form-group">
@@ -404,6 +559,17 @@ function App() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="direccion">Dirección (opcional)</label>
+                <input
+                  type="text"
+                  id="direccion"
+                  value={newEvent.direccion}
+                  onChange={(e) => setNewEvent({ ...newEvent, direccion: e.target.value })}
+                  placeholder="Ej: Av. Corrientes 1234, Buenos Aires"
+                />
               </div>
 
               <div className="modal-actions">
@@ -456,6 +622,92 @@ function App() {
                 onClick={handleDeleteConfirm}
               >
                 Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isConflictModalOpen && conflictInfo && (
+        <div className="modal-overlay" onClick={() => setIsConflictModalOpen(false)}>
+          <div className="modal-content delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Conflicto de Horarios</h2>
+              <button className="modal-close" onClick={() => setIsConflictModalOpen(false)}>×</button>
+            </div>
+            <div className="delete-modal-content">
+              <div className="delete-icon">⚠️</div>
+              <p>{conflictInfo.error}</p>
+              {conflictInfo.conflicts && conflictInfo.conflicts.length > 0 && (
+                <div style={{ marginTop: '16px', textAlign: 'left' }}>
+                  <strong style={{ color: '#667eea', display: 'block', marginBottom: '8px' }}>Eventos conflictivos:</strong>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    {conflictInfo.conflicts.map((conflict, idx) => (
+                      <li key={idx} style={{ padding: '8px', background: '#f0f4ff', borderRadius: '6px', marginBottom: '6px' }}>
+                        <span style={{ fontWeight: 600 }}>{conflict.title}</span>
+                        <br />
+                        <small style={{ color: '#6b7280' }}>
+                          {new Date(conflict.start).toLocaleString('es-AR')}
+                          {conflict.end && ` - ${new Date(conflict.end).toLocaleString('es-AR')}`}
+                        </small>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="delete-warning" style={{ marginTop: '16px' }}>¿Deseas guardar de todas formas?</p>
+            </div>
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => setIsConflictModalOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                className="btn-primary" 
+                onClick={async () => {
+                  setIsConflictModalOpen(false);
+                  // Continuar con el guardado
+                  try {
+                    const localDate = new Date(newEvent.fecha_hora);
+                    const localDateFin = newEvent.fecha_hora_fin ? new Date(newEvent.fecha_hora_fin) : null;
+                    // Convertir a UTC usando toISOString() - JavaScript maneja la conversión automáticamente
+                    const fechaHoraISO = localDate.toISOString();
+                    const fechaHoraFinISO = localDateFin ? localDateFin.toISOString() : null;
+                    
+                    if (editingEvent) {
+                      await axios.put(`http://localhost:4000/actividades/${editingEvent.id}`, {
+                        titulo: newEvent.titulo,
+                        fecha_hora: fechaHoraISO,
+                        fecha_hora_fin: fechaHoraFinISO,
+                        tipo: newEvent.tipo,
+                        direccion: newEvent.direccion.trim() || null
+                      });
+                    } else {
+                      await axios.post('http://localhost:4000/actividades', {
+                        viaje_id: viajeId,
+                        titulo: newEvent.titulo,
+                        fecha_hora: fechaHoraISO,
+                        fecha_hora_fin: fechaHoraFinISO,
+                        tipo: newEvent.tipo,
+                        direccion: newEvent.direccion.trim() || null
+                      });
+                    }
+                    setIsModalOpen(false);
+                    setEditingEvent(null);
+                    setNewEvent({ titulo: '', fecha_hora: '', fecha_hora_fin: '', tipo: 'otro', direccion: '' });
+                    loadEvents();
+                  } catch (error) {
+                    console.error('Error guardando evento:', error);
+                    const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
+                    alert(`Error: ${errorMessage}`);
+                  }
+                }}
+              >
+                Guardar de todas formas
               </button>
             </div>
           </div>

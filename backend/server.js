@@ -1,4 +1,6 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const cors = require('cors');
 const axios = require('axios');
@@ -6,6 +8,13 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 app.use(cors({
   origin: true,
   credentials: true
@@ -314,9 +323,116 @@ app.delete('/actividades/:id', async (req, res) => {
   }
 });
 
+// Endpoint para que n8n consulte eventos próximos (dentro de 1 hora) y que necesitan notificación
+app.get('/actividades/proximas-notificar', async (req, res) => {
+  try {
+    const ahora = new Date();
+    const enUnaHora = new Date(ahora.getTime() + 60 * 60 * 1000); // +1 hora
+    const en40Minutos = new Date(ahora.getTime() + 40 * 60 * 1000); // +40 minutos
+    const en70Minutos = new Date(ahora.getTime() + 70 * 60 * 1000); // +70 minutos
+    
+    console.log('🔍 Consultando eventos para notificar:', { 
+      ahora: ahora.toISOString(), 
+      en40Minutos: en40Minutos.toISOString(),
+      en70Minutos: en70Minutos.toISOString()
+    });
+    
+    // Buscar eventos que están entre 40 y 70 minutos en el futuro
+    const { rows } = await pool.query(
+      `SELECT id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion
+       FROM actividades
+       WHERE fecha_hora >= $1 AND fecha_hora <= $2
+       ORDER BY fecha_hora ASC`,
+      [en40Minutos, en70Minutos]
+    );
+    
+    // Procesar y formatear los eventos con el mensaje listo
+    const eventosParaNotificar = rows.map(evento => {
+      const fechaHora = new Date(evento.fecha_hora);
+      const horaEvento = fechaHora.toLocaleTimeString('es-AR', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: 'America/Argentina/Buenos_Aires'
+      });
+      
+      return {
+        evento: evento,
+        mensaje: `En menos de 1 hora tienes: ${evento.titulo} a las ${horaEvento}`
+      };
+    });
+    
+    console.log(`✅ Encontrados ${eventosParaNotificar.length} eventos para notificar`);
+    
+    res.json(eventosParaNotificar);
+  } catch (err) {
+    console.error('❌ Error en GET /actividades/proximas-notificar:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para que n8n envíe notificaciones a los clientes
+app.post('/notificaciones/evento-proximo', async (req, res) => {
+  try {
+    const { evento, mensaje } = req.body;
+    console.log('📨 Notificación recibida de n8n:', JSON.stringify({ evento, mensaje }, null, 2));
+    
+    const clientesConectados = io.sockets.sockets.size;
+    console.log(`📡 Clientes conectados: ${clientesConectados}`);
+    
+    // Enviar notificación a todos los clientes conectados
+    io.emit('notificacion_evento', {
+      tipo: 'evento_proximo',
+      evento,
+      mensaje: mensaje || `En 1 hora tienes: ${evento?.titulo || evento?.title || 'un evento'}`,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log('✅ Notificación emitida a todos los clientes');
+    res.json({ success: true, message: 'Notificación enviada a los clientes', clientesConectados });
+  } catch (err) {
+    console.error('❌ Error en /notificaciones/evento-proximo:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint de prueba para verificar notificaciones
+app.post('/notificaciones/test', async (req, res) => {
+  try {
+    const { mensaje } = req.body;
+    const mensajePrueba = mensaje || 'Esta es una notificación de prueba desde el backend';
+    
+    console.log('🧪 Enviando notificación de prueba:', mensajePrueba);
+    
+    const clientesConectados = io.sockets.sockets.size;
+    console.log(`📡 Clientes conectados: ${clientesConectados}`);
+    
+    io.emit('notificacion_evento', {
+      tipo: 'evento_proximo',
+      evento: { titulo: 'Prueba' },
+      mensaje: mensajePrueba,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ success: true, message: 'Notificación de prueba enviada', clientesConectados });
+  } catch (err) {
+    console.error('❌ Error en /notificaciones/test:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('Cliente conectado:', socket.id);
+  
+  socket.on('disconnect', () => {
+    console.log('Cliente desconectado:', socket.id);
+  });
+});
+
 connectWithRetry().then(() => {
   setupListener();
-  app.listen(4000, '0.0.0.0', () => {
+  server.listen(4000, '0.0.0.0', () => {
     console.log('Backend corriendo en http://localhost:4000');
+    console.log('WebSocket server activo');
   });
 });

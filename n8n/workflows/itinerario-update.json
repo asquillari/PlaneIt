@@ -3,17 +3,72 @@
   "nodes": [
     {
       "parameters": {
-        "path": "itinerario-update",
-        "method": "POST",
-        "responseMode": "onReceived"
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
       },
-      "name": "Webhook Cambio",
-      "type": "n8n-nodes-base.webhook",
+      "name": "Cron - Verificar Cada 1 Min",
+      "type": "n8n-nodes-base.cron",
       "typeVersion": 1,
-      "position": [240, 300]
+      "position": [240, 300],
+      "id": "cron-verificar"
+    },
+    {
+      "parameters": {
+        "url": "http://backend:4000/actividades/proximas-notificar",
+        "options": {}
+      },
+      "name": "Consultar Eventos para Notificar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "id": "consultar-eventos"
+    },
+    {
+      "parameters": {
+        "url": "http://backend:4000/notificaciones/evento-proximo",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "name": "Enviar Notificación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300],
+      "id": "enviar-notificacion"
     }
   ],
-  "connections": {},
+  "connections": {
+    "Cron - Verificar Cada 1 Min": {
+      "main": [
+        [
+          {
+            "node": "Consultar Eventos para Notificar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Eventos para Notificar": {
+      "main": [
+        [
+          {
+            "node": "Enviar Notificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
   "active": true,
   "settings": {},
   "id": "1"

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import axios from 'axios';
+import io from 'socket.io-client';
 import Login from './Login';
 import './App.css';
 
@@ -58,12 +59,174 @@ function App() {
     }
   }, []);
 
+  // WebSocket para recibir notificaciones de n8n
+  const socketRef = useRef(null);
+
+  // Sistema de notificaciones (definido antes de useEffect para que esté disponible)
+  const showNotification = (title, message, type = 'info', persistente = false, eventoData = null) => {
+    const id = Date.now() + Math.random();
+    const notification = {
+      id,
+      title,
+      message,
+      type, // 'success', 'info', 'warning', 'error'
+      timestamp: new Date(),
+      persistente, // Si es true, se guarda en el cuadro
+      eventoData // Datos del evento (para verificar si ya pasó)
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    
+    // Solo auto-eliminar toasts (no persistentes) después de 5 segundos
+    if (!persistente) {
+      setTimeout(() => {
+        removeNotification(id);
+      }, 5000);
+    }
+  };
+
+  const removeNotification = (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
+  // Generar notificaciones basadas en eventos reales próximos
+  const [notificacionesGeneradas, setNotificacionesGeneradas] = useState(new Set());
+  
+  useEffect(() => {
+    if (user && events.length > 0) {
+      const ahora = new Date();
+      const enUnaHora = new Date(ahora.getTime() + 60 * 60 * 1000);
+      const en40Minutos = new Date(ahora.getTime() + 40 * 60 * 1000);
+      
+      events.forEach(event => {
+        const eventId = event.id;
+        const eventStart = new Date(event.start);
+        
+        // Solo procesar eventos que están entre 40 y 70 minutos en el futuro
+        if (eventStart >= en40Minutos && eventStart <= enUnaHora) {
+          // Verificar si ya generamos una notificación para este evento
+          if (!notificacionesGeneradas.has(eventId)) {
+            const horaEvento = eventStart.toLocaleTimeString('es-AR', {
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+            
+            const mensaje = `En menos de 1 hora tienes: ${event.title} a las ${horaEvento}`;
+            
+            // Crear notificación persistente basada en el evento real
+            showNotification(
+              'Evento próximo',
+              mensaje,
+              'info',
+              true, // Persistente
+              {
+                id: event.id,
+                titulo: event.title,
+                fecha_hora: eventStart.toISOString()
+              }
+            );
+            
+            setNotificacionesGeneradas(prev => new Set(prev).add(eventId));
+          }
+        }
+      });
+    }
+  }, [user, events]);
+
+  // Verificar y eliminar notificaciones de eventos que ya pasaron
+  useEffect(() => {
+    if (user) {
+      const checkExpiredNotifications = () => {
+        const ahora = new Date();
+        setNotifications(prev => prev.filter(notification => {
+          // Si no es persistente, mantenerla (se elimina automáticamente después de 5 seg)
+          if (!notification.persistente) {
+            return true;
+          }
+          
+          // Si no tiene datos del evento, mantenerla
+          if (!notification.eventoData || !notification.eventoData.fecha_hora) {
+            return true;
+          }
+          
+          // Verificar si el evento ya pasó (con 5 minutos de margen)
+          const fechaEvento = new Date(notification.eventoData.fecha_hora);
+          const eventoYaPaso = fechaEvento.getTime() <= (ahora.getTime() - 5 * 60 * 1000);
+          
+          // Si el evento ya pasó, también eliminar del set de notificaciones generadas
+          if (eventoYaPaso && notification.eventoData.id) {
+            setNotificacionesGeneradas(prev => {
+              const nuevo = new Set(prev);
+              nuevo.delete(notification.eventoData.id);
+              return nuevo;
+            });
+          }
+          
+          return !eventoYaPaso;
+        }));
+      };
+      
+      // Verificar cada minuto
+      const intervalCheck = setInterval(checkExpiredNotifications, 60000);
+      checkExpiredNotifications(); // Verificar inmediatamente
+      
+      return () => clearInterval(intervalCheck);
+    }
+  }, [user]);
+
   // Cargar eventos solo si está autenticado
   useEffect(() => {
     if (user) {
       loadEvents();
       const interval = setInterval(loadEvents, 3000);
-      return () => clearInterval(interval);
+      
+      // Conectar WebSocket para recibir notificaciones de n8n
+      socketRef.current = io('http://localhost:4000');
+      
+      socketRef.current.on('connect', () => {
+        console.log('✅ Conectado al WebSocket para notificaciones');
+      });
+      
+      socketRef.current.on('notificacion_evento', (data) => {
+        console.log('📨 Notificación recibida de n8n:', data);
+        if (data.mensaje) {
+          // Mostrar como toast temporal (5 segundos) en la esquina
+          showNotification(
+            'Evento próximo',
+            data.mensaje,
+            'info',
+            false, // No persistente para el toast
+            data.evento // Guardar datos del evento
+          );
+          
+          // También guardar como persistente en el cuadro
+          showNotification(
+            'Evento próximo',
+            data.mensaje,
+            'info',
+            true, // Persistente para el cuadro
+            data.evento // Guardar datos del evento
+          );
+        } else {
+          console.warn('⚠️ Notificación sin mensaje:', data);
+        }
+      });
+      
+      socketRef.current.on('error', (error) => {
+        console.error('❌ Error en WebSocket:', error);
+      });
+      
+      socketRef.current.on('disconnect', () => {
+        console.log('❌ Desconectado del WebSocket');
+      });
+      
+      return () => {
+        clearInterval(interval);
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+      };
     }
   }, [user]);
 
@@ -366,29 +529,6 @@ function App() {
     return events.filter(e => e.extendedProps.tipo === tipo).length;
   };
 
-  // Sistema de notificaciones
-  const showNotification = (title, message, type = 'info') => {
-    const id = Date.now() + Math.random();
-    const notification = {
-      id,
-      title,
-      message,
-      type, // 'success', 'info', 'warning', 'error'
-      timestamp: new Date()
-    };
-    
-    setNotifications(prev => [...prev, notification]);
-    
-    // Auto-eliminar después de 5 segundos
-    setTimeout(() => {
-      removeNotification(id);
-    }, 5000);
-  };
-
-  const removeNotification = (id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  };
-
   const handleLogin = (userData) => {
     setUser(userData);
   };
@@ -396,7 +536,7 @@ function App() {
   const handleLogout = async () => {
     try {
       await axios.post('http://localhost:4000/auth/logout');
-    } catch (err) {
+} catch (err) {
       console.error('Error al cerrar sesión:', err);
     }
     
@@ -405,6 +545,7 @@ function App() {
     delete axios.defaults.headers.common['Authorization'];
     setUser(null);
   };
+
 
   // Mostrar login si no está autenticado
   if (!user) {
@@ -493,6 +634,42 @@ function App() {
                 <span className="btn-add-icon">+</span>
                 Nuevo evento
               </button>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Notificaciones</h3>
+            <div className="notifications-saved">
+              {notifications.filter(n => n.persistente).length === 0 ? (
+                <div className="notifications-empty">No hay notificaciones guardadas</div>
+              ) : (
+                notifications
+                  .filter(n => n.persistente)
+                  .map(notification => (
+                    <div 
+                      key={notification.id} 
+                      className={`notification-saved notification-saved-${notification.type}`}
+                    >
+                      <div className="notification-saved-icon">
+                        {notification.type === 'success' && '✅'}
+                        {notification.type === 'info' && 'ℹ️'}
+                        {notification.type === 'warning' && '⚠️'}
+                        {notification.type === 'error' && '❌'}
+                      </div>
+                      <div className="notification-saved-content">
+                        <div className="notification-saved-title">{notification.title}</div>
+                        <div className="notification-saved-message">{notification.message}</div>
+                      </div>
+                      <button 
+                        className="notification-saved-close"
+                        onClick={() => removeNotification(notification.id)}
+                        title="Cerrar"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
 
@@ -760,9 +937,9 @@ function App() {
         </div>
       )}
 
-      {/* Sistema de Notificaciones */}
+      {/* Sistema de Notificaciones (Toasts temporales - esquina derecha) */}
       <div className="notifications-container">
-        {notifications.map(notification => (
+        {notifications.filter(n => !n.persistente).map(notification => (
           <div 
             key={notification.id} 
             className={`notification notification-${notification.type}`}

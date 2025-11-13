@@ -35,16 +35,34 @@ services:
       - backend
 
   n8n:
-    image: n8nio/n8n
+    image: n8nio/n8n:latest
     restart: always
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=localhost
+      - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
+      - N8N_BASIC_AUTH_ACTIVE=false
     volumes:
       - n8n-data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:5678/healthz', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  n8n-importer:
+    build: ./n8n-importer
+    restart: "no"
+    depends_on:
+      n8n:
+        condition: service_healthy
+    environment:
+      - N8N_URL=http://n8n:5678
+    volumes:
+      - ./n8n/workflows:/workflows:ro
 
 volumes:
   postgres-data:

@@ -63,7 +63,7 @@ function App() {
   const socketRef = useRef(null);
 
   // Sistema de notificaciones (definido antes de useEffect para que esté disponible)
-  const showNotification = (title, message, type = 'info', persistente = false, eventoData = null) => {
+  const showNotification = (title, message, type = 'info', persistente = false, eventoData = null, emoji = null) => {
     const id = Date.now() + Math.random();
     const notification = {
       id,
@@ -72,7 +72,8 @@ function App() {
       type, // 'success', 'info', 'warning', 'error'
       timestamp: new Date(),
       persistente, // Si es true, se guarda en el cuadro
-      eventoData // Datos del evento (para verificar si ya pasó)
+      eventoData, // Datos del evento (para verificar si ya pasó)
+      emoji // Emoji del tipo de evento
     };
     
     setNotifications(prev => [...prev, notification]);
@@ -113,6 +114,10 @@ function App() {
             
             const mensaje = `En menos de 1 hora tienes: ${event.title} a las ${horaEvento}`;
             
+            // Obtener emoji del tipo de evento
+            const tipoEvento = event.extendedProps?.tipo || 'otro';
+            const emoji = EVENT_TYPES[tipoEvento]?.icon || '📍';
+            
             // Crear notificación persistente basada en el evento real
             showNotification(
               'Evento próximo',
@@ -122,8 +127,10 @@ function App() {
               {
                 id: event.id,
                 titulo: event.title,
-                fecha_hora: eventStart.toISOString()
-              }
+                fecha_hora: eventStart.toISOString(),
+                tipo: tipoEvento
+              },
+              emoji // Emoji del tipo de evento
             );
             
             setNotificacionesGeneradas(prev => new Set(prev).add(eventId));
@@ -184,19 +191,22 @@ function App() {
       socketRef.current = io('http://localhost:4000');
       
       socketRef.current.on('connect', () => {
-        console.log('✅ Conectado al WebSocket para notificaciones');
+        // Conectado
       });
       
       socketRef.current.on('notificacion_evento', (data) => {
-        console.log('📨 Notificación recibida de n8n:', data);
         if (data.mensaje) {
+          // Obtener emoji del tipo de evento
+          const emoji = data.emoji || (data.evento?.tipo ? EVENT_TYPES[data.evento.tipo]?.icon : 'ℹ️');
+          
           // Mostrar como toast temporal (5 segundos) en la esquina
           showNotification(
             'Evento próximo',
             data.mensaje,
             'info',
             false, // No persistente para el toast
-            data.evento // Guardar datos del evento
+            data.evento, // Guardar datos del evento
+            emoji // Emoji del tipo de evento
           );
           
           // También guardar como persistente en el cuadro
@@ -205,19 +215,18 @@ function App() {
             data.mensaje,
             'info',
             true, // Persistente para el cuadro
-            data.evento // Guardar datos del evento
+            data.evento, // Guardar datos del evento
+            emoji // Emoji del tipo de evento
           );
-        } else {
-          console.warn('⚠️ Notificación sin mensaje:', data);
         }
       });
       
       socketRef.current.on('error', (error) => {
-        console.error('❌ Error en WebSocket:', error);
+        // Error silencioso
       });
       
       socketRef.current.on('disconnect', () => {
-        console.log('❌ Desconectado del WebSocket');
+        // Desconectado
       });
       
       return () => {
@@ -258,10 +267,10 @@ function App() {
         textColor: '#fff'
       };
     }));
-    } catch (error) {
-      console.error('Error cargando eventos:', error);
-    }
-  };
+  } catch (error) {
+    // Error silencioso
+  }
+};
 
   const getColorForType = (tipo) => {
     return EVENT_TYPES[tipo]?.color || EVENT_TYPES.otro.color;
@@ -441,10 +450,6 @@ function App() {
       }
       
       // Guardar el evento (sin conflictos)
-      console.log('Fecha local ingresada:', newEvent.fecha_hora);
-      console.log('Fecha convertida a UTC:', fechaHoraISO);
-      console.log('Fecha fin convertida a UTC:', fechaHoraFinISO);
-      
       if (editingEvent) {
         // Actualizar evento existente
         await axios.put(`http://localhost:4000/actividades/${editingEvent.id}`, {
@@ -479,7 +484,6 @@ function App() {
       
       loadEvents();
     } catch (error) {
-      console.error('Error guardando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
       showNotification('Error', errorMessage, 'error');
     }
@@ -507,9 +511,8 @@ function App() {
         'info'
       );
       
-    loadEvents();
+      loadEvents();
     } catch (error) {
-      console.error('Error eliminando evento:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
       showNotification('Error', errorMessage, 'error');
     }
@@ -537,7 +540,7 @@ function App() {
     try {
       await axios.post('http://localhost:4000/auth/logout');
 } catch (err) {
-      console.error('Error al cerrar sesión:', err);
+      // Error silencioso
     }
     
     localStorage.removeItem('token');
@@ -651,10 +654,12 @@ function App() {
                       className={`notification-saved notification-saved-${notification.type}`}
                     >
                       <div className="notification-saved-icon">
-                        {notification.type === 'success' && '✅'}
-                        {notification.type === 'info' && 'ℹ️'}
-                        {notification.type === 'warning' && '⚠️'}
-                        {notification.type === 'error' && '❌'}
+                        {notification.emoji || (
+                          notification.type === 'success' ? '✅' :
+                          notification.type === 'info' ? 'ℹ️' :
+                          notification.type === 'warning' ? '⚠️' :
+                          notification.type === 'error' ? '❌' : 'ℹ️'
+                        )}
                       </div>
                       <div className="notification-saved-content">
                         <div className="notification-saved-title">{notification.title}</div>
@@ -924,7 +929,6 @@ function App() {
                     
                     loadEvents();
                   } catch (error) {
-                    console.error('Error guardando evento:', error);
                     const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
                     showNotification('Error', errorMessage, 'error');
                   }

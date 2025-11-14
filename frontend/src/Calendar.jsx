@@ -35,10 +35,8 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
     direccion: ''
   });
 
-  // WebSocket para recibir notificaciones de n8n
   const socketRef = useRef(null);
 
-  // Sistema de notificaciones
   const showNotification = (title, message, type = 'info', persistente = false, eventoData = null, emoji = null) => {
     const id = Date.now() + Math.random();
     const notification = {
@@ -65,7 +63,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  // Generar notificaciones basadas en eventos reales próximos
   const [notificacionesGeneradas, setNotificacionesGeneradas] = useState(new Set());
   
   useEffect(() => {
@@ -110,7 +107,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
     }
   }, [user, events]);
 
-  // Verificar y eliminar notificaciones de eventos que ya pasaron
   useEffect(() => {
     if (user) {
       const checkExpiredNotifications = () => {
@@ -146,7 +142,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
     }
   }, [user]);
 
-  // Cargar eventos
   useEffect(() => {
     if (user && viajeId) {
       loadEvents();
@@ -155,7 +150,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
       socketRef.current = io('http://localhost:4000');
       
       socketRef.current.on('connect', () => {
-        // Conectado
       });
       
       socketRef.current.on('notificacion_evento', (data) => {
@@ -183,7 +177,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
       });
       
       socketRef.current.on('solicitud_aceptada', (data) => {
-        // Solo mostrar la notificación al solicitante
         if (data.solicitante_id === user.id && data.viaje?.id === viajeId) {
           showNotification(
             'Solicitud aceptada',
@@ -194,7 +187,6 @@ function Calendar({ viajeId, viajeNombre, user, onLogout }) {
       });
       
       socketRef.current.on('solicitud_rechazada', (data) => {
-        // Solo mostrar la notificación al solicitante
         if (data.solicitante_id === user.id && data.viaje?.id === viajeId) {
           showNotification(
             'Solicitud rechazada',

@@ -1252,6 +1252,81 @@ body {
   margin-left: 12px;
 }
 
+.solicitud-card-page {
+  cursor: default;
+}
+
+.solicitud-info-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.solicitud-user-info,
+.solicitud-date-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.solicitud-label {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.solicitud-username {
+  font-size: 15px;
+  color: #667eea;
+  font-weight: 600;
+}
+
+.solicitud-date {
+  font-size: 14px;
+  color: #374151;
+}
+
+.solicitud-footer-page {
+  display: flex;
+  gap: 10px;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.solicitud-footer-page .btn-primary,
+.solicitud-footer-page .btn-secondary {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+}
+
+.viaje-badge.solicitado {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-notification {
+  position: relative;
+  background: #ef4444;
+  color: white;
+  border-radius: 50%;
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  line-height: 1;
+}
+
 @media (max-width: 768px) {
   .home-main {
     padding: 20px;

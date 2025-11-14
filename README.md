@@ -1,13 +1,13 @@
-# PlaneIt 🗓️
+# PlaneIt 
 
 Sistema de gestión de calendarios de viaje colaborativo con notificaciones en tiempo real y automatización mediante n8n.
 
-## 📋 Descripción
+## Descripción
 
 PlaneIt es una aplicación web que permite a los usuarios crear y gestionar múltiples calendarios de viaje. Los usuarios pueden crear sus propios calendarios, solicitar unirse a calendarios de otros usuarios, y colaborar en tiempo real. El sistema incluye notificaciones automáticas cuando un evento está próximo (1 hora antes) y utiliza n8n para automatizar el flujo de notificaciones.
 
 
-## 🛠️ Stack Tecnológico
+## Stack Tecnológico
 
 ### Frontend
 - **React 18** - Framework de UI
@@ -33,7 +33,7 @@ PlaneIt es una aplicación web que permite a los usuarios crear y gestionar múl
 - **Docker** - Contenedores
 - **Docker Compose** - Orquestación de servicios
 
-## 📁 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 PlaneIt/
@@ -64,7 +64,7 @@ PlaneIt/
 └── README.md
 ```
 
-## 🚀 Cómo Correr el Proyecto
+## Cómo Correr el Proyecto
 
 ### Prerrequisitos
 

@@ -45,7 +45,6 @@ function HomePage({ user, onLogout }) {
     });
     
     socketRef.current.on('solicitud_aceptada', (data) => {
-      // Solo mostrar la notificación al solicitante
       if (data.solicitante_id === user.id) {
         showNotification(
           'Solicitud aceptada',
@@ -57,7 +56,6 @@ function HomePage({ user, onLogout }) {
     });
     
     socketRef.current.on('solicitud_rechazada', (data) => {
-      // Solo mostrar la notificación al solicitante
       if (data.solicitante_id === user.id) {
         showNotification(
           'Solicitud rechazada',
@@ -90,7 +88,6 @@ function HomePage({ user, onLogout }) {
       const res = await axios.get('http://localhost:4000/viajes/solicitudes');
       setSolicitudes(res.data);
     } catch (error) {
-      // Error silencioso
     }
   };
 
@@ -121,7 +118,6 @@ function HomePage({ user, onLogout }) {
   const handleSolicitarUnirse = async (viajeId) => {
     try {
       await axios.post(`http://localhost:4000/viajes/${viajeId}/solicitar-unirse`);
-      // La notificación se mostrará automáticamente vía WebSocket al creador
       loadViajes();
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
@@ -129,28 +125,6 @@ function HomePage({ user, onLogout }) {
     }
   };
 
-  const handleAceptarSolicitud = async (solicitudId) => {
-    try {
-      await axios.post(`http://localhost:4000/viajes/solicitudes/${solicitudId}/aceptar`);
-      // La notificación se mostrará automáticamente vía WebSocket
-      loadSolicitudes();
-      loadViajes();
-    } catch (error) {
-      const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
-      showNotification('Error', errorMessage, 'error');
-    }
-  };
-
-  const handleRechazarSolicitud = async (solicitudId) => {
-    try {
-      await axios.post(`http://localhost:4000/viajes/solicitudes/${solicitudId}/rechazar`);
-      // La notificación se mostrará automáticamente vía WebSocket
-      loadSolicitudes();
-    } catch (error) {
-      const errorMessage = error.response?.data?.error || error.message || 'Error desconocido';
-      showNotification('Error', errorMessage, 'error');
-    }
-  };
 
   return (
     <div className="app-container">
@@ -179,43 +153,25 @@ function HomePage({ user, onLogout }) {
         <div className="home-content">
           <div className="home-header">
             <h2>Mis Calendarios</h2>
-            <button 
-              className="btn-primary"
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              + Nuevo Calendario
-            </button>
-          </div>
-
-          {solicitudes.length > 0 && (
-            <div className="solicitudes-section">
-              <h3>Solicitudes Pendientes</h3>
-              <div className="solicitudes-list">
-                {solicitudes.map(solicitud => (
-                  <div key={solicitud.id} className="solicitud-card">
-                    <div className="solicitud-info">
-                      <strong>{solicitud.solicitante_username}</strong> quiere unirse a{' '}
-                      <strong>{solicitud.viaje_nombre}</strong>
-                    </div>
-                    <div className="solicitud-actions">
-                      <button
-                        className="btn-success"
-                        onClick={() => handleAceptarSolicitud(solicitud.id)}
-                      >
-                        Aceptar
-                      </button>
-                      <button
-                        className="btn-danger"
-                        onClick={() => handleRechazarSolicitud(solicitud.id)}
-                      >
-                        Rechazar
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => navigate('/solicitudes')}
+                style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                <span>Solicitudes</span>
+                {solicitudes.length > 0 && (
+                  <span className="badge-notification">{solicitudes.length}</span>
+                )}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                + Nuevo Calendario
+              </button>
             </div>
-          )}
+          </div>
 
           {viajes.creados.length > 0 && (
             <div className="viajes-section">

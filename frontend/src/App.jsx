@@ -4,6 +4,7 @@ import axios from 'axios';
 import Login from './Login';
 import HomePage from './HomePage';
 import Calendar from './Calendar';
+import SolicitudesPage from './SolicitudesPage';
 import './App.css';
 
 function App() {
@@ -45,7 +46,6 @@ function App() {
     try {
       await axios.post('http://localhost:4000/auth/logout');
     } catch (err) {
-      // Error silencioso
     }
     
     localStorage.removeItem('token');
@@ -77,6 +77,10 @@ function App() {
           path="/viaje/:viajeId" 
           element={<CalendarRoute user={user} onLogout={handleLogout} />} 
         />
+        <Route 
+          path="/solicitudes" 
+          element={<SolicitudesPage user={user} onLogout={handleLogout} />} 
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
@@ -97,7 +101,6 @@ function CalendarRoute({ user, onLogout }) {
           setViajeNombre(viaje.nombre);
         }
       } catch (error) {
-        // Error silencioso
       } finally {
         setLoading(false);
       }

@@ -21,12 +21,9 @@ function Login({ onLogin }) {
         password
       });
 
-      // Guardar token en localStorage
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
 
-      // Configurar axios para usar el token en todas las peticiones
-      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
 
       onLogin(response.data.user, response.data.token);
     } catch (err) {

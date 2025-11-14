@@ -21,7 +21,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Almacenamiento simple de sesiones en memoria (en producción usar Redis o similar)
 const sessions = new Map();
 
 const pool = new Pool({
@@ -60,12 +59,10 @@ async function setupListener() {
         }
       });
     } catch (e) {
-      // Error silencioso
     }
   });
 }
 
-// Middleware de autenticación
 const requireAuth = (req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
   if (!token || !sessions.has(token)) {
@@ -75,7 +72,6 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-// Endpoint de registro
 app.post('/auth/register', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -92,22 +88,18 @@ app.post('/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
     }
     
-    // Verificar si el usuario ya existe
     const existingUser = await pool.query('SELECT id FROM usuarios WHERE username = $1', [username]);
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'El usuario ya existe' });
     }
     
-    // Hashear contraseña
     const passwordHash = await bcrypt.hash(password, 10);
     
-    // Crear usuario
     const { rows } = await pool.query(
       'INSERT INTO usuarios (username, password_hash) VALUES ($1, $2) RETURNING id, username',
       [username, passwordHash]
     );
     
-    // Crear sesión
     const token = crypto.randomBytes(32).toString('hex');
     sessions.set(token, { id: rows[0].id, username: rows[0].username });
     
@@ -120,7 +112,6 @@ app.post('/auth/register', async (req, res) => {
   }
 });
 
-// Endpoint de login
 app.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -129,7 +120,6 @@ app.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
     }
     
-    // Buscar usuario
     const { rows } = await pool.query(
       'SELECT id, username, password_hash FROM usuarios WHERE username = $1',
       [username]
@@ -139,13 +129,11 @@ app.post('/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
     
-    // Verificar contraseña
     const isValid = await bcrypt.compare(password, rows[0].password_hash);
     if (!isValid) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
     
-    // Crear sesión
     const token = crypto.randomBytes(32).toString('hex');
     sessions.set(token, { id: rows[0].id, username: rows[0].username });
     
@@ -158,12 +146,10 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-// Endpoint para verificar sesión
 app.get('/auth/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-// Endpoint de logout
 app.post('/auth/logout', requireAuth, (req, res) => {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
   if (token) {
@@ -172,10 +158,8 @@ app.post('/auth/logout', requireAuth, (req, res) => {
   res.json({ message: 'Sesión cerrada' });
 });
 
-// Helper para verificar acceso a un viaje
 async function tieneAccesoViaje(usuarioId, viajeId) {
   try {
-    // Verificar si es el creador
     const creadorCheck = await pool.query(
       'SELECT id FROM viajes WHERE id = $1 AND creado_por = $2',
       [viajeId, usuarioId]
@@ -184,7 +168,6 @@ async function tieneAccesoViaje(usuarioId, viajeId) {
       return true;
     }
     
-    // Verificar si tiene acceso compartido
     const accesoCheck = await pool.query(
       'SELECT id FROM viajes_usuarios WHERE viaje_id = $1 AND usuario_id = $2',
       [viajeId, usuarioId]
@@ -195,7 +178,6 @@ async function tieneAccesoViaje(usuarioId, viajeId) {
   }
 }
 
-// Crear nuevo viaje
 app.post('/viajes', requireAuth, async (req, res) => {
   try {
     const { nombre } = req.body;
@@ -210,7 +192,6 @@ app.post('/viajes', requireAuth, async (req, res) => {
       [nombre.trim(), usuarioId]
     );
     
-    // Agregar al creador como usuario con acceso
     await pool.query(
       'INSERT INTO viajes_usuarios (viaje_id, usuario_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [rows[0].id, usuarioId]
@@ -222,12 +203,10 @@ app.post('/viajes', requireAuth, async (req, res) => {
   }
 });
 
-// Listar viajes del usuario (propios y compartidos)
 app.get('/viajes', requireAuth, async (req, res) => {
   try {
     const usuarioId = req.user.id;
     
-    // Viajes creados por el usuario
     const viajesCreados = await pool.query(
       `SELECT v.*, 'creador' as rol 
        FROM viajes v 
@@ -236,7 +215,6 @@ app.get('/viajes', requireAuth, async (req, res) => {
       [usuarioId]
     );
     
-    // Viajes compartidos con el usuario
     const viajesCompartidos = await pool.query(
       `SELECT v.*, 'miembro' as rol 
        FROM viajes v 
@@ -246,7 +224,6 @@ app.get('/viajes', requireAuth, async (req, res) => {
       [usuarioId]
     );
     
-    // Todos los viajes disponibles (para solicitar unirse)
     const todosViajes = await pool.query(
       `SELECT v.*, 
         CASE 
@@ -270,30 +247,25 @@ app.get('/viajes', requireAuth, async (req, res) => {
   }
 });
 
-// Solicitar unirse a un viaje
 app.post('/viajes/:viajeId/solicitar-unirse', requireAuth, async (req, res) => {
   try {
     const { viajeId } = req.params;
     const usuarioId = req.user.id;
     
-    // Verificar que el viaje existe
     const viajeCheck = await pool.query('SELECT id, creado_por FROM viajes WHERE id = $1', [viajeId]);
     if (viajeCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Viaje no encontrado' });
     }
     
-    // No puede solicitar unirse a su propio viaje
     if (viajeCheck.rows[0].creado_por === usuarioId) {
       return res.status(400).json({ error: 'Ya eres el creador de este viaje' });
     }
     
-    // Verificar si ya tiene acceso
     const tieneAcceso = await tieneAccesoViaje(usuarioId, viajeId);
     if (tieneAcceso) {
       return res.status(400).json({ error: 'Ya tienes acceso a este viaje' });
     }
     
-    // Verificar si ya existe una solicitud pendiente
     const solicitudExistente = await pool.query(
       'SELECT id FROM solicitudes_unirse WHERE viaje_id = $1 AND solicitante_id = $2 AND estado = $3',
       [viajeId, usuarioId, 'pendiente']
@@ -303,13 +275,11 @@ app.post('/viajes/:viajeId/solicitar-unirse', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Ya existe una solicitud pendiente para este viaje' });
     }
     
-    // Crear solicitud
     const { rows } = await pool.query(
       'INSERT INTO solicitudes_unirse (viaje_id, solicitante_id) VALUES ($1, $2) RETURNING *',
       [viajeId, usuarioId]
     );
     
-    // Notificar al creador del viaje
     const creadorId = viajeCheck.rows[0].creado_por;
     io.emit('solicitud_unirse', {
       tipo: 'solicitud_unirse',
@@ -326,12 +296,10 @@ app.post('/viajes/:viajeId/solicitar-unirse', requireAuth, async (req, res) => {
   }
 });
 
-// Obtener solicitudes pendientes (para el creador del viaje)
 app.get('/viajes/solicitudes', requireAuth, async (req, res) => {
   try {
     const usuarioId = req.user.id;
     
-    // Obtener solicitudes de viajes donde el usuario es el creador
     const { rows } = await pool.query(
       `SELECT s.*, 
         u.username as solicitante_username,
@@ -350,13 +318,11 @@ app.get('/viajes/solicitudes', requireAuth, async (req, res) => {
   }
 });
 
-// Aceptar solicitud de unión
 app.post('/viajes/solicitudes/:solicitudId/aceptar', requireAuth, async (req, res) => {
   try {
     const { solicitudId } = req.params;
     const usuarioId = req.user.id;
     
-    // Obtener la solicitud y verificar que el usuario es el creador del viaje
     const solicitudCheck = await pool.query(
       `SELECT s.*, v.creado_por, v.nombre as viaje_nombre, u.username as solicitante_username
        FROM solicitudes_unirse s
@@ -372,19 +338,16 @@ app.post('/viajes/solicitudes/:solicitudId/aceptar', requireAuth, async (req, re
     
     const solicitud = solicitudCheck.rows[0];
     
-    // Actualizar estado de la solicitud
     await pool.query(
       'UPDATE solicitudes_unirse SET estado = $1 WHERE id = $2',
       ['aceptada', solicitudId]
     );
     
-    // Agregar usuario al viaje
     await pool.query(
       'INSERT INTO viajes_usuarios (viaje_id, usuario_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [solicitud.viaje_id, solicitud.solicitante_id]
     );
     
-    // Notificar al solicitante
     io.emit('solicitud_aceptada', {
       tipo: 'solicitud_aceptada',
       solicitud: { ...solicitud, estado: 'aceptada' },
@@ -399,13 +362,11 @@ app.post('/viajes/solicitudes/:solicitudId/aceptar', requireAuth, async (req, re
   }
 });
 
-// Rechazar solicitud de unión
 app.post('/viajes/solicitudes/:solicitudId/rechazar', requireAuth, async (req, res) => {
   try {
     const { solicitudId } = req.params;
     const usuarioId = req.user.id;
     
-    // Obtener la solicitud y verificar que el usuario es el creador del viaje
     const solicitudCheck = await pool.query(
       `SELECT s.*, v.nombre as viaje_nombre, u.username as solicitante_username
        FROM solicitudes_unirse s
@@ -421,13 +382,11 @@ app.post('/viajes/solicitudes/:solicitudId/rechazar', requireAuth, async (req, r
     
     const solicitud = solicitudCheck.rows[0];
     
-    // Actualizar estado de la solicitud
     await pool.query(
       'UPDATE solicitudes_unirse SET estado = $1 WHERE id = $2',
       ['rechazada', solicitudId]
     );
     
-    // Notificar al solicitante
     io.emit('solicitud_rechazada', {
       tipo: 'solicitud_rechazada',
       solicitud: { ...solicitud, estado: 'rechazada' },
@@ -442,7 +401,6 @@ app.post('/viajes/solicitudes/:solicitudId/rechazar', requireAuth, async (req, r
   }
 });
 
-// Verificar acceso a un viaje
 app.get('/viajes/:viajeId/acceso', requireAuth, async (req, res) => {
   try {
     const { viajeId } = req.params;
@@ -465,7 +423,6 @@ app.get('/viajes/:viajeId/actividades', requireAuth, async (req, res) => {
     const viajeId = req.params.viajeId;
     const usuarioId = req.user.id;
     
-    // Verificar acceso
     const tieneAcceso = await tieneAccesoViaje(usuarioId, viajeId);
     if (!tieneAcceso) {
       return res.status(403).json({ error: 'No tienes acceso a este viaje' });
@@ -490,12 +447,10 @@ app.post('/actividades', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     
-    // Validar que fecha_hora_fin sea posterior a fecha_hora si se proporciona
     if (fecha_hora_fin && new Date(fecha_hora_fin) <= new Date(fecha_hora)) {
       return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
     }
     
-    // Verificar acceso al viaje
     const tieneAcceso = await tieneAccesoViaje(usuarioId, viaje_id);
     if (!tieneAcceso) {
       return res.status(403).json({ error: 'No tienes acceso a este viaje' });
@@ -522,18 +477,15 @@ app.put('/actividades/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     
-    // Validar que fecha_hora_fin sea posterior a fecha_hora si se proporciona
     if (fecha_hora_fin && new Date(fecha_hora_fin) <= new Date(fecha_hora)) {
       return res.status(400).json({ error: 'La hora de fin debe ser posterior a la hora de inicio' });
     }
     
-    // Obtener la actividad para verificar acceso al viaje
     const actividadCheck = await pool.query('SELECT viaje_id FROM actividades WHERE id = $1', [id]);
     if (actividadCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Actividad no encontrada' });
     }
     
-    // Verificar acceso al viaje
     const tieneAcceso = await tieneAccesoViaje(usuarioId, actividadCheck.rows[0].viaje_id);
     if (!tieneAcceso) {
       return res.status(403).json({ error: 'No tienes acceso a este viaje' });
@@ -558,13 +510,11 @@ app.delete('/actividades/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     const usuarioId = req.user.id;
     
-    // Obtener la actividad para verificar acceso al viaje
     const actividadCheck = await pool.query('SELECT viaje_id FROM actividades WHERE id = $1', [id]);
     if (actividadCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Actividad no encontrada' });
     }
     
-    // Verificar acceso al viaje
     const tieneAcceso = await tieneAccesoViaje(usuarioId, actividadCheck.rows[0].viaje_id);
     if (!tieneAcceso) {
       return res.status(403).json({ error: 'No tienes acceso a este viaje' });
@@ -581,15 +531,13 @@ app.delete('/actividades/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Endpoint para que n8n consulte eventos próximos (dentro de 1 hora) y que necesitan notificación
 app.get('/actividades/proximas-notificar', async (req, res) => {
   try {
     const ahora = new Date();
-    const enUnaHora = new Date(ahora.getTime() + 60 * 60 * 1000); // +1 hora
-    const en40Minutos = new Date(ahora.getTime() + 40 * 60 * 1000); // +40 minutos
-    const en70Minutos = new Date(ahora.getTime() + 70 * 60 * 1000); // +70 minutos
+    const enUnaHora = new Date(ahora.getTime() + 60 * 60 * 1000); 
+    const en40Minutos = new Date(ahora.getTime() + 40 * 60 * 1000); 
+    const en70Minutos = new Date(ahora.getTime() + 70 * 60 * 1000); 
     
-    // Buscar eventos que están entre 40 y 70 minutos en el futuro
     const { rows } = await pool.query(
       `SELECT id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion
        FROM actividades
@@ -598,7 +546,6 @@ app.get('/actividades/proximas-notificar', async (req, res) => {
       [en40Minutos, en70Minutos]
     );
     
-    // Procesar y formatear los eventos con el mensaje listo
     const eventosParaNotificar = rows.map(evento => {
       const fechaHora = new Date(evento.fecha_hora);
       const horaEvento = fechaHora.toLocaleTimeString('es-AR', { 
@@ -619,12 +566,10 @@ app.get('/actividades/proximas-notificar', async (req, res) => {
   }
 });
 
-// Endpoint para que n8n envíe notificaciones a los clientes
 app.post('/notificaciones/evento-proximo', async (req, res) => {
   try {
     const { evento, mensaje } = req.body;
     
-    // Mapeo de tipos a emojis
     const tipoEmojis = {
       hotel: '🏨',
       vuelo: '✈️',
@@ -637,7 +582,6 @@ app.post('/notificaciones/evento-proximo', async (req, res) => {
     
     const emoji = req.body.emoji || (evento?.tipo ? tipoEmojis[evento.tipo] : '📍');
     
-    // Enviar notificación a todos los clientes conectados
     io.emit('notificacion_evento', {
       tipo: 'evento_proximo',
       evento,
@@ -652,7 +596,6 @@ app.post('/notificaciones/evento-proximo', async (req, res) => {
   }
 });
 
-// Endpoint de prueba para verificar notificaciones
 app.post('/notificaciones/test', async (req, res) => {
   try {
     const { mensaje } = req.body;
@@ -671,8 +614,7 @@ app.post('/notificaciones/test', async (req, res) => {
   }
 });
 
-// Cron en el backend para verificar eventos próximos y notificar a n8n
-const eventosNotificados = new Set(); // Para evitar notificaciones duplicadas
+const eventosNotificados = new Set();
 
 async function verificarEventosProximos() {
   try {
@@ -680,7 +622,6 @@ async function verificarEventosProximos() {
     const en40Minutos = new Date(ahora.getTime() + 40 * 60 * 1000);
     const en70Minutos = new Date(ahora.getTime() + 70 * 60 * 1000);
     
-    // Buscar eventos que están entre 40 y 70 minutos en el futuro
     const { rows } = await pool.query(
       `SELECT id, titulo, fecha_hora, fecha_hora_fin, tipo, direccion
        FROM actividades
@@ -690,7 +631,6 @@ async function verificarEventosProximos() {
     );
     
     for (const evento of rows) {
-      // Verificar si ya notificamos este evento
       if (eventosNotificados.has(evento.id)) {
         continue;
       }
@@ -702,7 +642,6 @@ async function verificarEventosProximos() {
         timeZone: 'America/Argentina/Buenos_Aires'
       });
       
-      // Mapeo de tipos a emojis
       const tipoEmojis = {
         hotel: '🏨',
         vuelo: '✈️',
@@ -716,7 +655,6 @@ async function verificarEventosProximos() {
       const emoji = tipoEmojis[evento.tipo] || '📍';
       const mensaje = `En menos de 1 hora tienes: ${evento.titulo} a las ${horaEvento}`;
       
-      // Llamar a n8n para que envíe la notificación
       const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || "http://n8n:5678/webhook/itinerario-update";
       
       try {
@@ -734,11 +672,9 @@ async function verificarEventosProximos() {
         
         eventosNotificados.add(evento.id);
       } catch (error) {
-        // Error silencioso
       }
     }
     
-    // Limpiar eventos que ya pasaron del set de notificados
     const eventosPasados = await pool.query(
       `SELECT id FROM actividades WHERE fecha_hora < $1`,
       [ahora]
@@ -749,31 +685,24 @@ async function verificarEventosProximos() {
     });
     
   } catch (err) {
-    // Error silencioso
   }
 }
 
-// Ejecutar el cron cada minuto
 let cronInterval;
 function iniciarCron() {
-  // Ejecutar inmediatamente
   verificarEventosProximos();
   
-  // Luego cada minuto
   cronInterval = setInterval(verificarEventosProximos, 60 * 1000);
 }
 
-// WebSocket connection handling
 io.on('connection', (socket) => {
   socket.on('disconnect', () => {
-    // Desconexión silenciosa
   });
 });
 
 connectWithRetry().then(() => {
   setupListener();
-  iniciarCron(); // Iniciar el cron para verificar eventos próximos
+  iniciarCron(); 
   server.listen(4000, '0.0.0.0', () => {
-    // Servidor iniciado
   });
 });

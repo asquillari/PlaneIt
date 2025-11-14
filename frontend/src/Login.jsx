@@ -37,7 +37,7 @@ function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <span className="login-icon">🗓️</span>
+          <span className="login-icon">✈️</span>
           <h1>PlaneIt</h1>
           <p>Calendario de Viaje</p>
         </div>
